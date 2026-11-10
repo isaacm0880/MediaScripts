@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Remove Video Black Bars
+Name=Remove Video Black Bars
 Comment=Choose videos, analyse, preview, confirm, crop
 Icon=transform-crop
 Categories=AudioVideo;Video;
