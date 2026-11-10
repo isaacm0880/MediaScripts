@@ -5,6 +5,6 @@ Actions=ExtractSquareThumbnail
 X-KDE-Priority=TopLevel
 
 [Desktop Action ExtractSquareThumbnail]
-Extract Square Cover (JPEG)
+Name=Extract Square Cover (JPEG)
 Icon=image-x-generic
 Exec=sh -c 'for f do "/home/isaac/Custom/Scripts/media-tools/bin/audio-extract-square-cover" "$f"; done' sh %F
