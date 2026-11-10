@@ -44,7 +44,7 @@ The default destination is `~/.local/opt/media-tools`. To choose another directo
 bash install.sh --prefix ~/Custom/Scripts/media-tools
 ```
 
-The installer copies all seven tools (plus compatibility aliases for previous command names) and example configuration, updates the absolute paths in KDE desktop entries, and installs:
+The installer copies all seven tools and example configuration, updates the absolute paths in KDE desktop entries, and installs:
 
 | Component | Destination |
 | --- | --- |
