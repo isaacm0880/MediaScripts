@@ -22,14 +22,14 @@ src=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 mkdir -p -- "$prefix"
 prefix=$(cd -- "$prefix" && pwd -P)
 [[ $prefix != "$src" ]] || { echo "Install prefix must differ from repository directory." >&2; exit 1; }
-for c in cp sed chmod; do command -v "$c" >/dev/null || { echo "Missing command: $c" >&2; exit 1; }; done
+for c in cp chmod python3; do command -v "$c" >/dev/null || { echo "Missing command: $c" >&2; exit 1; }; done
 service_dir="${XDG_DATA_HOME:-$HOME/.local/share}/kio/servicemenus"
 app_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p -- "$service_dir" "$app_dir"
 stamp=$(date +%Y%m%d-%H%M%S)
 backup="$prefix/.install-backups/$stamp"
 # Backup only paths we manage, without deleting unrelated user files.
-for rel in bin/img2png bin/resolve-prep bin/crop-bars lib/common.sh lib/run-tests.sh README.md; do
+for rel in bin/img2png bin/resolve-prep bin/crop-bars bin/extract-audio-artwork bin/extract-square-thumbnail bin/remove-black-bars bin/resolve-keyboard-fix lib/common.sh lib/run-tests.sh README.md; do
   if [[ -e "$prefix/$rel" ]]; then
     mkdir -p -- "$backup/$(dirname "$rel")"
     cp -a -- "$prefix/$rel" "$backup/$rel"
@@ -59,7 +59,7 @@ import os, pathlib, sys
 source = pathlib.Path(sys.argv[1]).read_text()
 path = os.environ["PREFIX"]
 # KDE Exec uses shell-like argument syntax: quote paths containing whitespace.
-if any(ch in path for ch in '\n\r"'):
+if any(ch in path for ch in '\n\r"\\'):
     raise SystemExit("Install path must not contain quotes or newlines")
 source = source.replace(os.environ["OLD"], path.replace(' ', '\\ '))
 pathlib.Path(sys.argv[2]).write_text(source)
