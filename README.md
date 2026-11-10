@@ -14,6 +14,8 @@ A collection of Bash tools designed for KDE Plasma 6 on CachyOS/Arch Linux. Use 
 | `image-remove-borders` | Trim uniform borders from images | Cropped image |
 | `resolve-keyboard-fix` | Toggle KDE appmenu workaround for Resolve shortcuts | KDE module state |
 
+The KDE application launcher groups the four graphical shortcuts in a **Media Tools** folder. Dolphin right-click actions remain available on matching files.
+
 ## Installation
 
 ### Requirements
