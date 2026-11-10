@@ -1,0 +1,17 @@
+#!/bin/bash
+
+choice=$(kdialog --title "DaVinci Resolve Keyboard Fix" \
+    --menu "Choose an option:" \
+    enable "Enable Resolve keyboard shortcut fix" \
+    disable "Disable Resolve keyboard shortcut fix")
+
+case "$choice" in
+    enable)
+        qdbus6 org.kde.kded6 /kded org.kde.kded6.unloadModule appmenu
+        kdialog --title "DaVinci Resolve" --msgbox "Keyboard shortcut fix enabled."
+        ;;
+    disable)
+        qdbus6 org.kde.kded6 /kded org.kde.kded6.loadModule appmenu
+        kdialog --title "DaVinci Resolve" --msgbox "Keyboard shortcut fix disabled."
+        ;;
+esac

@@ -1,0 +1,11 @@
+
+[Desktop Entry]
+Type=Service
+MimeType=audio/mpeg;audio/mp4;audio/x-m4a;audio/flac;audio/ogg;audio/opus;audio/x-wav;audio/aac;audio/x-ms-wma;
+Actions=ExtractSquareThumbnail
+X-KDE-Priority=TopLevel
+
+[Desktop Action ExtractSquareThumbnail]
+Name=Extract Square Thumbnail
+Icon=image-x-generic
+Exec=sh -c 'for f do "/home/isaac/Custom/Scripts/extract-square-thumbnail.sh" "$f"; done' sh %F
