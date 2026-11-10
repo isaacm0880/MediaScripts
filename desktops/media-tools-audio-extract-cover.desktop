@@ -6,6 +6,6 @@ Actions=extractAudioArtwork;
 X-KDE-Priority=TopLevel
 
 [Desktop Action extractAudioArtwork]
-Extract Cover Art (PNG)
+Name=Extract Cover Art (PNG)
 Icon=image-png
 Exec=/home/isaac/Custom/Scripts/media-tools/bin/audio-extract-cover %F
