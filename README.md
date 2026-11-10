@@ -1,5 +1,26 @@
 # media-tools — img2png, resolve-prep, crop-bars
 
+## Quick install (recommended)
+
+Clone the repository, then run the installer as your normal desktop user (not sudo):
+
+```fish
+git clone https://github.com/isaacm0880/MediaScripts.git
+cd MediaScripts
+bash install.sh
+```
+
+Default installation: `~/.local/opt/media-tools`. Choose another location with:
+
+```fish
+bash install.sh --prefix ~/Custom/Scripts/media-tools
+```
+
+The installer copies the scripts, shared library and example configs; rewrites the absolute paths in all KDE service-menu and application-launcher entries; installs those entries into the correct per-user XDG directories; and refreshes KDE's cache. Existing managed files are backed up to `<prefix>/.install-backups/<timestamp>/` when present. The source checkout can be kept for updates. Restart Dolphin to refresh its context menu.
+
+**Note:** The older manual installation and update instructions below use historical folder names (`desktop/`, `config/`, `tests/`). The actual repository folders are `desktops/`, `conf examples/`, and `lib/`. Use `install.sh` instead.
+
+
 Three manually-run Bash tools for CachyOS / KDE Plasma 6 (Wayland) / Fish. No daemons, no watchers.
 
 ```
