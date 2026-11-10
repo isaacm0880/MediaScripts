@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# Backwards-compatible alias for audio-extract-square-cover.
-exec "$(dirname -- "${BASH_SOURCE[0]}")/audio-extract-square-cover" "$@"
