@@ -74,7 +74,7 @@ for oldname in media-tools-img2png.desktop media-tools-resolve-prep.desktop medi
   fi
 done
 for oldname in media-tools-img2png-launcher.desktop media-tools-resolve-prep-launcher.desktop media-tools-crop-bars-launcher.desktop; do
-  if [[ -f "$app_dir/$oldname" ]] && grep -Fq "$old/bin/" "$app_dir/$oldname"; then
+  if [[ -f "$app_dir/$oldname" ]] && grep -Fq "/bin/" "$app_dir/$oldname"; then
     mkdir -p -- "$backup/kde/retired"
     mv -- "$app_dir/$oldname" "$backup/kde/retired/$oldname"
   fi
