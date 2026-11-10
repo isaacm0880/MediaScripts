@@ -1,0 +1,9 @@
+<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN" "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
+<Menu>
+  <Name>Applications</Name>
+  <Menu>
+    <Name>Media Tools</Name>
+    <Directory>media-tools.directory</Directory>
+    <Include><Category>MediaTools</Category></Include>
+  </Menu>
+</Menu>
