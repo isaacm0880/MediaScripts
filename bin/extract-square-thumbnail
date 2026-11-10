@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Extract embedded cover art from an audio file and centre-crop it square.
+# Usage: extract-square-thumbnail.sh FILE [OUTPUT.jpg]
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "Usage: $0 AUDIO_FILE [OUTPUT.jpg]" >&2
+    exit 2
+fi
+
+input=$(realpath -- "$1")
+[[ -f "$input" ]] || { echo "File not found: $input" >&2; exit 1; }
+
+for cmd in ffmpeg ffprobe; do
+    command -v "$cmd" >/dev/null || {
+        echo "Missing dependency: $cmd (install with: sudo pacman -S ffmpeg)" >&2
+        exit 1
+    }
+done
+
+if [[ $# -eq 2 ]]; then
+    output=$2
+else
+    output="$(dirname -- "$input")/$(basename -- "${input%.*}")-thumbnail.jpg"
+fi
+
+# Locate the embedded cover-art stream.
+stream=$(
+    ffprobe -v error -select_streams v \
+        -show_entries stream=index:stream_disposition=attached_pic \
+        -of json "$input" |
+    python -c '
+import json, sys
+data = json.load(sys.stdin)
+for s in data.get("streams", []):
+    if s.get("disposition", {}).get("attached_pic", 0):
+        print(s["index"])
+        break
+'
+)
+
+if [[ -z "$stream" ]]; then
+    echo "No embedded cover artwork found in: $input" >&2
+    exit 1
+fi
+
+mkdir -p -- "$(dirname -- "$output")"
+[[ ! -e "$output" ]] || { echo "Output already exists: $output" >&2; exit 1; }
+tmp=$(mktemp --tmpdir="$(dirname -- "$output")" --suffix=.jpg)
+trap 'rm -f -- "$tmp"' EXIT
+
+ffmpeg -hide_banner -loglevel error -y \
+    -i "$input" -map "0:$stream" -frames:v 1 \
+    -vf "crop=min(iw\,ih):min(iw\,ih):(iw-min(iw\,ih))/2:(ih-min(iw\,ih))/2" \
+    -q:v 2 "$tmp"
+
+ln -- "$tmp" "$output"
+rm -f -- "$tmp"
+trap - EXIT
+
+echo "Saved square thumbnail: $output"
