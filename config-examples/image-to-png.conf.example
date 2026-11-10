@@ -1,0 +1,7 @@
+# Optional configuration for image-to-png
+# Copy to ${XDG_CONFIG_HOME:-$HOME/.config}/media-tools/image-to-png.conf
+# Bash assignments; environment variables and CLI options take precedence.
+# MAGICK=magick
+# GIMP_BIN=gimp-console
+GIMP_TIMEOUT=300
+# OUT_DIR="$HOME/Pictures/converted"
