@@ -41,8 +41,26 @@ for dir in bin lib; do
 done
 cp -- "$src/README.md" "$prefix/README.md"
 chmod +x "$prefix"/bin/* "$prefix/lib/run-tests.sh"
-mkdir -p -- "$prefix/conf examples"
-cp -a -- "$src/conf examples/." "$prefix/conf examples/"
+# Install current example configs; preserve user-created config files separately.
+mkdir -p -- "$prefix/config-examples"
+for example in "$src"/config-examples/*.conf.example; do
+  [[ -f "$example" ]] || continue
+  dest="$prefix/config-examples/$(basename "$example")"
+  if [[ -e "$dest" ]]; then
+    mkdir -p -- "$backup/config-examples"
+    cp -a -- "$dest" "$backup/config-examples/$(basename "$dest")"
+  fi
+  cp -- "$example" "$dest"
+done
+# Retire only the old installer-owned example files, leaving any other files intact.
+for oldname in img2png.conf.example resolve-prep.conf.example crop-bars.conf.example; do
+  oldfile="$prefix/conf examples/$oldname"
+  if [[ -f "$oldfile" ]]; then
+    mkdir -p -- "$backup/legacy-config-examples"
+    mv -- "$oldfile" "$backup/legacy-config-examples/$oldname"
+  fi
+done
+if [[ -d "$prefix/conf examples" ]]; then rmdir -- "$prefix/conf examples" 2>/dev/null || true; fi
 # Desktop files use literal hardcoded paths in the source; replace on installation.
 old='/home/isaac/Custom/Scripts/media-tools'
 for file in "$src"/desktops/*.desktop "$src"/launchers/*.desktop; do
