@@ -1,0 +1,570 @@
+#!/usr/bin/env bash
+# video-remove-borders - detect and remove GENUINE black bars (letterbox / pillarbox /
+# both) from a video, conservatively.
+#
+# How the decision is made (details in README):
+#   1. Sample N points spread across the video (not just the opening seconds).
+#      At each point run ffmpeg's cropdetect on a few consecutive frames.
+#   2. Discard samples that carry no evidence (near-black frames, fades,
+#      blank output).  Dark scenes can only make bars look BIGGER than they
+#      are, so they are excluded from the vote.
+#   3. For every edge take the SMALLEST bar seen in any usable sample (never
+#      crop more than every sample agrees is empty) and require that a large
+#      share of the samples agree with it.  Otherwise: ambiguous -> flagged,
+#      nothing is encoded unless you confirm or give the crop by hand.
+#   4. Re-check the proposed crop at DIFFERENT timestamps: the strips that
+#      would be removed are measured with signalstats; any real content in
+#      them rejects the crop.
+#   5. A safety margin and rounding always err towards cropping LESS.
+#
+# The original file is never modified.  Output goes to a temp file and is moved
+# into place only after a successful encode; existing files are never replaced.
+set -u -o pipefail
+
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+ROOT=$(dirname "$(dirname "$SELF")")
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" || { echo "cannot load $ROOT/lib/common.sh" >&2; exit 2; }
+
+usage() {
+  cat <<'EOF'
+Usage: video-remove-borders [options] [--] FILE...
+
+Default: analyse, show the report and a preview, then ask before encoding.
+
+Mode:
+  -a, --analyze            analysis only - report (and preview), never encode
+  -y, --yes                encode without asking IF the crop is validated
+      --accept-ambiguous   also encode an AMBIGUOUS result using the conservative crop
+      --crop W:H:X:Y       manual crop rectangle (skips detection)
+      --bars L,T,R,B       manual bar sizes in pixels (left,top,right,bottom)
+      --preview            write preview PNGs with the crop drawn as a red box
+                           (into ~/.cache/media-tools/previews, never beside the video)
+      --open               open the preview images (xdg-open)
+
+Detection tuning (defaults in brackets):
+      --samples N          sample points across the video [16]
+      --limit N            cropdetect black threshold, 8-bit luma [24]
+      --tol N              pixels two samples may differ and still "agree" [4]
+      --min-support F      share of usable samples that must agree, 0-1 [0.7]
+      --safety N           pixels of bar deliberately left uncropped [2]
+      --round N            crop sizes are rounded DOWN to a multiple of N [2]
+
+Encoding:
+      --encoder E          vaapi-hevc | vaapi-h264 | x265 | x264   [vaapi-hevc]
+      --quality N          QP (VAAPI) or CRF (x264/x265); default 18/18/18/16
+      --container mkv|mp4|mov   default: same as input (mkv if that is not possible)
+  -o, --out-dir DIR        output directory (default: beside the input)
+      --pick               choose files with a KDE file dialog (kdialog)
+      --pause              wait for Enter before the terminal closes
+  -h, --help        --version
+
+Exit status: 0 done / no bars / analysis finished, 1 failure, 2 usage or missing
+dependency, 3 left UNCHANGED because the result was ambiguous or unconfirmed.
+
+Config file (optional): ${XDG_CONFIG_HOME:-~/.config}/media-tools/video-remove-borders.conf
+EOF
+}
+
+# ----------------------------------------------------------- configuration ---
+CFG_VARS=(FFMPEG FFPROBE SAMPLES LIMIT TOL MIN_SUPPORT SAFETY_PX ROUND MIN_BAR_PX FRAMES_PER_SAMPLE
+  DARK_YAVG MIN_VALID VALIDATE_POINTS VALIDATE_YMAX MAX_REMOVED ENCODER QUALITY RENDER_NODE
+  PREVIEW_COUNT OUT_DIR)
+mt_load_config video-remove-borders "${CFG_VARS[@]}"
+: "${FFMPEG:=ffmpeg}"; : "${FFPROBE:=ffprobe}"
+: "${SAMPLES:=16}"            # detection sample points
+: "${LIMIT:=24}"              # cropdetect luma threshold (8-bit scale)
+: "${TOL:=4}"                 # px tolerance for "same edge"
+: "${MIN_SUPPORT:=0.7}"       # share of usable samples that must agree per edge
+: "${SAFETY_PX:=2}"           # px of bar left in place
+: "${ROUND:=2}"               # crop rounded down to a multiple of this
+: "${MIN_BAR_PX:=8}"          # bars thinner than this are treated as "no bar"
+: "${FRAMES_PER_SAMPLE:=8}"   # frames decoded at each sample point
+: "${DARK_YAVG:=30}"          # mean luma (0-255) below which a sample is "too dark to judge"
+: "${MIN_VALID:=6}"           # minimum usable samples required
+: "${VALIDATE_POINTS:=6}"     # independent validation timestamps
+: "${VALIDATE_YMAX:=48}"      # max luma allowed inside a strip that would be cropped
+: "${MAX_REMOVED:=0.6}"       # flag crops that remove more than this share of the frame
+: "${ENCODER:=vaapi-hevc}"
+: "${QUALITY:=}"
+: "${RENDER_NODE:=}"
+: "${PREVIEW_COUNT:=3}"
+: "${OUT_DIR:=}"
+
+ANALYZE=0; YES=0; ACCEPT_AMBIG=0; PREVIEW=0; OPEN=0; PICK=0
+MANUAL_CROP=""; MANUAL_BARS=""; CONTAINER=""
+FILES=()
+
+while (($#)); do
+  case $1 in --*=*) set -- "${1%%=*}" "${1#*=}" "${@:2}" ;; esac
+  case $1 in
+    -a|--analyze|-n|--dry-run) ANALYZE=1; shift ;;
+    -y|--yes)            YES=1; shift ;;
+    --accept-ambiguous)  ACCEPT_AMBIG=1; shift ;;
+    --crop)              [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; MANUAL_CROP=$2; shift 2 ;;
+    --bars)              [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; MANUAL_BARS=$2; shift 2 ;;
+    --preview)           PREVIEW=1; shift ;;
+    --open)              OPEN=1; PREVIEW=1; shift ;;
+    --samples)           [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; SAMPLES=$2; shift 2 ;;
+    --limit)             [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; LIMIT=$2; shift 2 ;;
+    --tol)               [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; TOL=$2; shift 2 ;;
+    --min-support)       [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; MIN_SUPPORT=$2; shift 2 ;;
+    --safety)            [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; SAFETY_PX=$2; shift 2 ;;
+    --round)             [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; ROUND=$2; shift 2 ;;
+    --encoder)           [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; ENCODER=$2; shift 2 ;;
+    --quality)           [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; QUALITY=$2; shift 2 ;;
+    --container)         [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; CONTAINER=$2; shift 2 ;;
+    -o|--out-dir)        [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; OUT_DIR=$2; shift 2 ;;
+    --pick)              PICK=1; shift ;;
+    --pause)             MT_PAUSE=1; shift ;;
+    -h|--help)           usage; exit 0 ;;
+    --version)           echo "video-remove-borders $MT_VERSION"; exit 0 ;;
+    --)                  shift; FILES+=("$@"); break ;;
+    -*)                  mt_err "Unknown option: $1"; usage >&2; exit 2 ;;
+    *)                   FILES+=("$1"); shift ;;
+  esac
+done
+
+mt_install_traps
+
+for v in SAMPLES LIMIT TOL SAFETY_PX ROUND MIN_BAR_PX FRAMES_PER_SAMPLE MIN_VALID VALIDATE_POINTS VALIDATE_YMAX DARK_YAVG; do
+  [[ ${!v} =~ ^[0-9]+$ ]] || mt_die 2 "$v must be a non-negative integer (got '${!v}')"
+done
+((ROUND >= 1)) || mt_die 2 "--round must be >= 1"
+((SAMPLES >= 3)) || mt_die 2 "--samples must be >= 3"
+[[ $MIN_SUPPORT =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] || mt_die 2 "--min-support must be between 0 and 1"
+case $ENCODER in vaapi-hevc|vaapi-h264|x265|x264) ;; *) mt_die 2 "--encoder must be vaapi-hevc, vaapi-h264, x265 or x264";; esac
+case $CONTAINER in ''|mkv|mp4|mov) ;; *) mt_die 2 "--container must be mkv, mp4 or mov";; esac
+if [[ -n $MANUAL_CROP && ! $MANUAL_CROP =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+$ ]]; then mt_die 2 "--crop must look like W:H:X:Y"; fi
+if [[ -n $MANUAL_BARS && ! $MANUAL_BARS =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then mt_die 2 "--bars must look like L,T,R,B"; fi
+if [[ -n $MANUAL_CROP && -n $MANUAL_BARS ]]; then mt_die 2 "use either --crop or --bars, not both"; fi
+if [[ -z $QUALITY ]]; then
+  case $ENCODER in x264) QUALITY=16 ;; *) QUALITY=18 ;; esac
+fi
+
+if ((PICK)); then
+  mt_pick_files "Choose videos to analyse for black bars" \
+    "*.mkv *.mp4 *.mov *.webm *.avi *.m4v *.ts *.m2ts *.mts *.mpg *.mpeg *.flv *.wmv | Video files" \
+    || { mt_info "No files chosen."; exit 0; }
+  FILES+=("${MT_PICKED[@]}")
+fi
+if ((${#FILES[@]} == 0)); then usage >&2; exit 2; fi
+if [[ -n $MANUAL_CROP || -n $MANUAL_BARS ]] && ((${#FILES[@]} > 1)); then
+  mt_die 2 "a manual crop applies to one video; pass a single file"
+fi
+
+mt_need "$FFMPEG" ffmpeg
+mt_need "$FFPROBE" ffmpeg
+mt_need awk gawk
+mt_deps_or_die
+
+# ---------------------------------------------------------------- helpers ---
+
+# detect_render_node -> prints the VA-API render node (prefers amdgpu)
+detect_render_node() {
+  local n drv
+  [[ -n $RENDER_NODE ]] && { printf '%s' "$RENDER_NODE"; return; }
+  for n in /dev/dri/renderD*; do
+    [[ -e $n ]] || continue
+    drv=$(basename -- "$(readlink -f -- "/sys/class/drm/${n##*/}/device/driver" 2>/dev/null)")
+    [[ $drv == amdgpu ]] && { printf '%s' "$n"; return; }
+  done
+  for n in /dev/dri/renderD*; do [[ -e $n ]] && { printf '%s' "$n"; return; }; done
+}
+
+# sample_times DURATION COUNT OFFSET -> one timestamp per line
+#   t_i = D * (i + OFFSET) / COUNT   (OFFSET 0.5 = centre of each slice)
+sample_times() {
+  awk -v d="$1" -v n="$2" -v o="$3" 'BEGIN{for(i=0;i<n;i++) printf "%.3f\n", d*(i+o)/n}'
+}
+
+# One cropdetect sample.  Sets SC_CROP ("w:h:x:y" or ""), SC_YAVG (mean luma).
+detect_sample() {
+  local file=$1 vidx=$2 t=$3 ystat err
+  ystat="$WORK/ystat.txt"; : >"$ystat"
+  err=$("$FFMPEG" -hide_banner -nostdin -v info -ss "$t" -i "file:$file" -map "0:$vidx" -an -sn -dn \
+        -frames:v "$FRAMES_PER_SAMPLE" \
+        -vf "cropdetect=limit=$LIMIT:round=2:reset=0,format=yuv420p,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=$ystat" \
+        -f null - 2>&1 </dev/null)
+  SC_CROP=$(grep -o 'crop=[0-9]*:[0-9]*:[0-9]*:[0-9]*' <<<"$err" | tail -n1)
+  SC_CROP=${SC_CROP#crop=}
+  SC_YAVG=$(sed -n 's/.*YAVG=//p' "$ystat" | awk '{s+=$1;n++} END{if(n) printf "%.1f", s/n; else print "0"}')
+}
+
+# strip_ymax FILE VIDX T W H X Y -> prints the max luma (8-bit scale) in that strip
+strip_ymax() {
+  local file=$1 vidx=$2 t=$3 w=$4 h=$5 x=$6 y=$7 ys
+  ys="$WORK/ymax.txt"; : >"$ys"
+  "$FFMPEG" -hide_banner -nostdin -v error -ss "$t" -i "file:$file" -map "0:$vidx" -an -sn -dn -frames:v 2 \
+    -vf "crop=$w:$h:$x:$y,format=yuv420p,signalstats,metadata=print:key=lavfi.signalstats.YMAX:file=$ys" \
+    -f null - </dev/null >/dev/null 2>&1
+  sed -n 's/.*YMAX=//p' "$ys" | sort -n | tail -n1
+}
+
+# edge_stats EDGE_ARRAY_NAME -> sets E_MIN E_MAX E_SUP (samples within TOL of the minimum)
+edge_stats() {
+  local -n arr=$1
+  local v
+  E_MIN=${arr[0]}; E_MAX=${arr[0]}; E_SUP=0
+  for v in "${arr[@]}"; do ((v < E_MIN)) && E_MIN=$v; ((v > E_MAX)) && E_MAX=$v; done
+  for v in "${arr[@]}"; do ((v - E_MIN <= TOL)) && ((E_SUP++)); done
+}
+
+# ------------------------------------------------------------- per file ---
+EXIT_WORST=0
+note_exit() { ((EXIT_WORST < $1)) && EXIT_WORST=$1; return 0; }
+
+process_file() {
+  local arg=$1 abs base stem ext outdir
+  [[ -e $arg ]] || { mt_err "Not found: $arg"; return 1; }
+  [[ -f $arg ]] || { mt_err "Not a regular file: $arg"; return 1; }
+  [[ -r $arg ]] || { mt_err "Not readable: $arg"; return 1; }
+  abs=$(realpath -e -- "$arg") || { mt_err "Cannot resolve: $arg"; return 1; }
+  base=$(basename -- "$abs"); stem=$(mt_stem "$base"); ext=$(mt_ext "$base")
+  outdir=${OUT_DIR:-$(dirname -- "$abs")}
+
+  mt_banner "$base"
+  if ! mt_probe_format "$abs" || ! mt_probe_streams "$abs"; then
+    mt_err "ffprobe could not read this file."; return 1
+  fi
+  ((${#MT_VID[@]} > 0)) || { mt_err "No video stream found."; return 1; }
+  local vidx=${MT_VID[0]} W H pix dur rot sar
+  W=${S_W[$vidx]}; H=${S_H[$vidx]}; pix=${S_PIX[$vidx]}; dur=$FMT_DUR; sar=${S_SAR[$vidx]}
+  [[ -n $W && -n $H ]] || { mt_err "Cannot read video dimensions."; return 1; }
+  rot=$("$FFPROBE" -v error -select_streams "$vidx" -show_entries stream_side_data=rotation -of default=nw=1:nk=1 -i "file:$abs" 2>/dev/null | head -n1)
+  rot=${rot%.*}
+  if [[ $rot == 90 || $rot == -90 || $rot == 270 || $rot == -270 ]]; then
+    local tmpw=$W; W=$H; H=$tmpw
+    mt_kv "Rotation:" "$rot° - dimensions below are the DISPLAYED (rotated) frame; ffmpeg auto-rotates before cropping"
+  fi
+  if [[ -z $dur ]]; then
+    dur=$("$FFPROBE" -v error -select_streams "$vidx" -show_entries stream=duration -of default=nw=1:nk=1 -i "file:$abs" 2>/dev/null | head -n1)
+    [[ $dur == N/A ]] && dur=""
+  fi
+  mt_kv "Source:" "${W}x${H}, ${S_CODEC[$vidx]} $pix, $(mt_frac_to_num "${S_AFR[$vidx]:-0/0}") fps${sar:+, SAR $sar}"
+  [[ -n $dur ]] && mt_kv "Duration:" "$(mt_hms "$dur")"
+  ((${#MT_VID[@]} > 1)) && mt_warn "${#MT_VID[@]} video streams: only the first (#$vidx) is analysed and cropped; the others are copied."
+
+  WORK=$(mt_mktemp_dir "${TMPDIR:-/tmp}") || { mt_err "cannot create a work directory"; return 1; }
+
+  local -a EDGE_L=() EDGE_T=() EDGE_R=() EDGE_B=() VALID_TS=() VALID_Y=()
+  local status="" reasons="" nvalid=0 ndiscard=0 i t L T R B CW CH CX CY
+  local -a notes=()
+
+  # ======================= 1. crop rectangle ==============================
+  if [[ -n $MANUAL_CROP || -n $MANUAL_BARS ]]; then
+    if [[ -n $MANUAL_CROP ]]; then
+      IFS=: read -r CW CH CX CY <<<"$MANUAL_CROP"
+      L=$CX; T=$CY; R=$((W - CX - CW)); B=$((H - CY - CH))
+    else
+      IFS=, read -r L T R B <<<"$MANUAL_BARS"
+      CX=$L; CY=$T; CW=$((W - L - R)); CH=$((H - T - B))
+    fi
+    if ((CW < 16 || CH < 16 || CX < 0 || CY < 0 || R < 0 || B < 0)); then
+      mt_err "Manual crop ${CW}x${CH}+${CX}+${CY} does not fit inside the ${W}x${H} frame."; return 1
+    fi
+    status=MANUAL; reasons="rectangle supplied by you (--crop/--bars); detection skipped"
+    mt_banner "Manual crop"
+  else
+    [[ -n $dur ]] || { mt_err "Unknown duration - cannot place sample points. Use --crop/--bars."; return 1; }
+    local -a stamps
+    mapfile -t stamps < <(sample_times "$dur" "$SAMPLES" 0.5)
+    mt_banner "Analysing ${#stamps[@]} sample points"
+    local k=0
+    for t in "${stamps[@]}"; do
+      ((k++))
+      detect_sample "$abs" "$vidx" "$t"
+      if [[ -z $SC_CROP ]]; then
+        ((ndiscard++)); notes+=("t=$(mt_hms "$t"): no picture detected (black frame/fade) - discarded"); continue
+      fi
+      IFS=: read -r CW CH CX CY <<<"$SC_CROP"
+      if awk -v y="$SC_YAVG" -v d="$DARK_YAVG" 'BEGIN{exit !(y<d)}'; then
+        ((ndiscard++)); notes+=("t=$(mt_hms "$t"): too dark to judge (mean luma $SC_YAVG) - discarded"); continue
+      fi
+      if ((CW <= 0 || CH <= 0 || CW * CH * 20 < W * H)); then
+        ((ndiscard++)); notes+=("t=$(mt_hms "$t"): detected area under 5% of the frame - discarded"); continue
+      fi
+      EDGE_L+=("$CX"); EDGE_T+=("$CY"); EDGE_R+=("$((W - CX - CW))"); EDGE_B+=("$((H - CY - CH))")
+      VALID_TS+=("$t"); VALID_Y+=("$SC_YAVG"); ((nvalid++))
+      printf '  sample %2d/%d  t=%-8s crop=%-18s L%-4d T%-4d R%-4d B%-4d  luma %s\n' \
+        "$k" "${#stamps[@]}" "$(mt_hms "$t")" "$SC_CROP" "$CX" "$CY" "$((W - CX - CW))" "$((H - CY - CH))" "$SC_YAVG"
+    done
+    for t in "${notes[@]}"; do mt_info "  $t"; done
+
+    if ((nvalid < MIN_VALID)); then
+      status=INSUFFICIENT
+      reasons="only $nvalid usable sample(s) of ${#stamps[@]} (need $MIN_VALID): the video is too dark/short to judge reliably"
+    else
+      # ============= 2. consensus per edge (smallest bar wins) ============
+      local -A BAR=() SUP=() MINV=() MAXV=()
+      local e supfrac weak=""
+      for e in L T R B; do
+        edge_stats "EDGE_$e"
+        MINV[$e]=$E_MIN; MAXV[$e]=$E_MAX; SUP[$e]=$E_SUP
+        BAR[$e]=$E_MIN
+        if awk -v s="$E_SUP" -v n="$nvalid" -v m="$MIN_SUPPORT" 'BEGIN{exit !(s/n < m)}'; then
+          weak+="${weak:+; }edge $e: only $E_SUP/$nvalid samples agree within ±${TOL}px (range ${E_MIN}..${E_MAX}px)"
+        fi
+      done
+      # ============= 3. safety margin and rounding (always crop LESS) =====
+      for e in L T R B; do
+        local b=${BAR[$e]}
+        if ((b < MIN_BAR_PX)); then b=0; else ((b = b > SAFETY_PX ? b - SAFETY_PX : 0)); fi
+        ((b -= b % ROUND))
+        BAR[$e]=$b
+      done
+      L=${BAR[L]}; T=${BAR[T]}; R=${BAR[R]}; B=${BAR[B]}
+      CW=$((W - L - R)); CH=$((H - T - B))
+      if ((CW % 2)); then if ((R > 0)); then ((R--)); elif ((L > 0)); then ((L--)); fi; fi
+      if ((CH % 2)); then if ((B > 0)); then ((B--)); elif ((T > 0)); then ((T--)); fi; fi
+      CW=$((W - L - R)); CH=$((H - T - B)); CX=$L; CY=$T
+
+      mt_banner "Consensus"
+      for e in L T R B; do
+        printf '  %-7s min %-4s max %-4s agree %d/%d   -> crop %dpx (after safety margin %d, rounding %d)\n' \
+          "$(case $e in L) echo left;; T) echo top;; R) echo right;; B) echo bottom;; esac)" \
+          "${MINV[$e]}" "${MAXV[$e]}" "${SUP[$e]}" "$nvalid" "${BAR[$e]}" "$SAFETY_PX" "$ROUND"
+      done
+      if [[ -n $weak ]]; then
+        status=AMBIGUOUS; reasons="bar size differs between scenes - $weak"
+      elif ((L + T + R + B == 0)); then
+        status=NONE; reasons="no persistent black bars: at least ${MIN_SUPPORT} of the usable samples show picture reaching every edge (or bars thinner than ${MIN_BAR_PX}px)"
+      else
+        status=CANDIDATE
+        reasons="$nvalid usable samples; every cropped edge is supported by >= $(awk -v m="$MIN_SUPPORT" 'BEGIN{printf "%d", m*100}')% of them"
+      fi
+      # unusually aggressive crop -> never silently accept
+      if [[ $status == CANDIDATE ]] && awk -v w="$CW" -v h="$CH" -v W="$W" -v H="$H" -v m="$MAX_REMOVED" 'BEGIN{exit !(1-(w*h)/(W*H) > m)}'; then
+        status=AMBIGUOUS; reasons="the crop would remove more than $(awk -v m="$MAX_REMOVED" 'BEGIN{printf "%d", m*100}')% of the frame - implausible for plain letterboxing; confirm by hand"
+      fi
+    fi
+  fi
+
+  # ======================= 4. independent validation =====================
+  local val_msg="" val_fail=0 val_checked=0
+  if [[ $status == CANDIDATE || $status == MANUAL || ( $status == AMBIGUOUS && $((L + T + R + B)) -gt 0 ) ]]; then
+    mt_banner "Validation at ${VALIDATE_POINTS} independent timestamps"
+    local -a vts; local vt strips s ymax sw sh sx sy name
+    if [[ -n $dur ]]; then mapfile -t vts < <(sample_times "$dur" "$VALIDATE_POINTS" 0.37); else vts=(1); fi
+    for vt in "${vts[@]}"; do
+      strips=()
+      ((L > 0)) && strips+=("left:$L:$H:0:0")
+      ((R > 0)) && strips+=("right:$R:$H:$((W - R)):0")
+      ((T > 0)) && strips+=("top:$W:$T:0:0")
+      ((B > 0)) && strips+=("bottom:$W:$B:0:$((H - B))")
+      for s in "${strips[@]}"; do
+        IFS=: read -r name sw sh sx sy <<<"$s"
+        ymax=$(strip_ymax "$abs" "$vidx" "$vt" "$sw" "$sh" "$sx" "$sy")
+        ((val_checked++))
+        if [[ -z $ymax ]]; then
+          val_msg+="  t=$(mt_hms "$vt") $name strip: no measurement\n"; continue
+        fi
+        if awk -v y="$ymax" -v m="$VALIDATE_YMAX" 'BEGIN{exit !(y>m)}'; then
+          ((val_fail++)); val_msg+="  t=$(mt_hms "$vt") $name strip: brightest pixel luma $ymax > $VALIDATE_YMAX -> picture/graphics inside the area to be cropped\n"
+        fi
+      done
+    done
+    if ((val_checked == 0)); then
+      mt_info "  (nothing to validate)"
+    elif ((val_fail == 0)); then
+      mt_ok "  PASS: $val_checked strip measurements; everything that would be removed is black."
+    else
+      printf '%b' "$val_msg"
+      mt_warn "$val_fail of $val_checked strip measurements found non-black content."
+      if [[ $status != MANUAL ]]; then status=AMBIGUOUS; reasons="validation failed: content exists inside the proposed crop area at ${val_fail} check(s) - bars differ between scenes or something is drawn in the bars (subtitles/logo)"; fi
+    fi
+    [[ $status == CANDIDATE ]] && status=VALIDATED
+  fi
+
+  # ============================ report ====================================
+  local conf="n/a"
+  if [[ $status == VALIDATED ]]; then
+    conf=MEDIUM
+    local minsup=100 e2
+    for e2 in L T R B; do local pc=$((100 * SUP[$e2] / nvalid)); ((pc < minsup)) && minsup=$pc; done
+    ((nvalid >= 10 && minsup >= 90 && val_checked >= 4)) && conf=HIGH
+  fi
+
+  mt_banner "Result: $status"
+  mt_kv "Source:" "${W}x${H}"
+  if [[ $status == NONE || $status == INSUFFICIENT ]]; then
+    mt_kv "Proposed crop:" "none"
+  else
+    mt_kv "Proposed crop:" "crop=${CW}:${CH}:${CX}:${CY}   (bars L${L} T${T} R${R} B${B})"
+    mt_kv "Result size:" "${CW}x${CH}  (aspect $(awk -v w="$CW" -v h="$CH" 'BEGIN{printf "%.3f", w/h}'):1)"
+  fi
+  mt_kv "Samples:" "${nvalid} usable, ${ndiscard} discarded"
+  [[ $status == VALIDATED ]] && mt_kv "Confidence:" "$conf"
+  mt_kv "Why:" "$reasons"
+  mt_info "  Limits: dim picture content darker than luma ~${LIMIT} at an edge looks like a bar; the safety margin and 'smallest bar wins' rule reduce, but cannot remove, that risk."
+
+  # ============================ preview ===================================
+  if ((PREVIEW)) && [[ $status != NONE && $status != INSUFFICIENT ]]; then
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/media-tools/previews" pv n=0 pts=() idx
+    mkdir -p -- "$cache" 2>/dev/null
+    if ((${#VALID_TS[@]} > 0)); then
+      local m=${#VALID_TS[@]} step=$(( ${#VALID_TS[@]} / PREVIEW_COUNT )); ((step < 1)) && step=1
+      for ((idx = step / 2; idx < m && ${#pts[@]} < PREVIEW_COUNT; idx += step)); do pts+=("${VALID_TS[$idx]}"); done
+    elif [[ -n $dur ]]; then mapfile -t pts < <(sample_times "$dur" "$PREVIEW_COUNT" 0.5); else pts=(1); fi
+    for t in "${pts[@]}"; do
+      ((n++)); pv=$(mt_unique_path "$cache" "$stem.crop-preview-$n" ".png" stamp)
+      if "$FFMPEG" -hide_banner -nostdin -v error -ss "$t" -i "file:$abs" -map "0:$vidx" -frames:v 1 \
+           -vf "drawbox=x=$CX:y=$CY:w=$CW:h=$CH:color=red@0.9:t=4" -y -f image2 "file:$pv" </dev/null 2>/dev/null && [[ -s $pv ]]; then
+        mt_kv "Preview $n:" "$pv"
+        ((OPEN)) && command -v xdg-open >/dev/null 2>&1 && xdg-open "$pv" >/dev/null 2>&1 &
+      fi
+    done
+    mt_info "  (red box = area that would be KEPT; previews live in the cache folder, not beside your video)"
+  fi
+
+  # ============================ decide ====================================
+  case $status in
+    NONE)          mt_ok "  No black bars to remove - file left unchanged."; return 0 ;;
+    INSUFFICIENT)  mt_warn "Not enough evidence - file left unchanged. Retry with --samples 32 or give --crop/--bars."; note_exit 3; return 0 ;;
+  esac
+  if ((ANALYZE)); then
+    mt_info "  Analysis only (--analyze): nothing encoded."
+    if [[ $status == AMBIGUOUS ]] && ((L + T + R + B == 0)); then
+      mt_info "  The conservative result is NO crop. To crop anyway, give the rectangle yourself: video-remove-borders --crop W:H:X:Y FILE"
+    elif [[ $status == AMBIGUOUS ]]; then
+      mt_info "  To proceed anyway:  video-remove-borders --crop ${CW}:${CH}:${CX}:${CY} FILE   (conservative suggestion)"
+    else
+      mt_info "  To encode this crop:  video-remove-borders --yes FILE"
+    fi
+    return 0
+  fi
+  local go=0
+  case $status in
+    VALIDATED|MANUAL) ((YES)) && go=1 || { mt_confirm "Encode with this crop?" && go=1; } ;;
+    AMBIGUOUS)
+      mt_warn "AMBIGUOUS - bar size is not consistent enough to crop automatically."
+      if ((L + T + R + B == 0)); then
+        mt_info "  The conservative crop is no crop, so the file stays unchanged. Use --crop W:H:X:Y to force a rectangle."
+        note_exit 3; return 0
+      elif ((ACCEPT_AMBIG)); then go=1
+      else mt_confirm "Use the conservative crop above anyway?" && go=1; fi ;;
+  esac
+  if ((!go)); then
+    mt_warn "Not confirmed - file left unchanged."
+    mt_info "  Re-run with --crop W:H:X:Y (see above), --yes, or --accept-ambiguous."
+    note_exit 3; return 0
+  fi
+
+  encode_file "$abs" "$vidx" "$stem" "$ext" "$outdir" "$CW" "$CH" "$CX" "$CY"
+}
+
+# ============================== encode ====================================
+encode_file() {
+  local abs=$1 vidx=$2 stem=$3 ext=$4 outdir=$5 CW=$6 CH=$7 CX=$8 CY=$9
+  local outext muxer chroma depth pix=${S_PIX[$vidx]} node vf fmt i k final tmp rc
+  local -a CMD=() MAPS=() OPTS=() PRE=() dropped=()
+
+  [[ -d $outdir && -w $outdir ]] || { mt_err "Output directory missing or not writable: $outdir"; return 1; }
+  chroma=$(mt_pix_chroma "$pix"); depth=$(mt_pix_depth "$pix")
+
+  # ---- container: keep the input's when it can hold HEVC/H.264 ----------
+  outext=${CONTAINER:-}
+  if [[ -z $outext ]]; then
+    case $ext in mkv|mp4|mov) outext=$ext ;; m4v) outext=mp4 ;; *) outext=mkv ;; esac
+  fi
+  case $outext in mkv) muxer=matroska ;; mp4) muxer=mp4 ;; mov) muxer=mov ;; esac
+
+  # ---- encoder ----------------------------------------------------------
+  case $ENCODER in
+    vaapi-hevc|vaapi-h264)
+      if [[ $chroma != 420 || ( $depth != 8 && ! ( $ENCODER == vaapi-hevc && $depth == 10 ) ) ]]; then
+        mt_err "Source is $pix; VAAPI on AMD cannot encode it without changing chroma/bit depth. Use --encoder x265 (or x264)."; return 1
+      fi
+      node=$(detect_render_node)
+      if [[ -z $node || ! -r $node || ! -w $node ]]; then
+        mt_err "No usable VA-API render node (${node:-none found} ). Set RENDER_NODE=/dev/dri/renderD128 or use --encoder x265."
+        mt_info "  On Arch: sudo pacman -S libva-mesa-driver libva-utils   then check:  vainfo --display drm --device <node>"; return 1
+      fi
+      local want=hevc_vaapi; [[ $ENCODER == vaapi-h264 ]] && want=h264_vaapi
+      local enc_list; enc_list=$("$FFMPEG" -hide_banner -encoders 2>/dev/null)
+      grep -q " $want " <<<"$enc_list" || { mt_err "This FFmpeg has no $want encoder."; return 1; }
+      fmt=nv12; ((depth == 10)) && fmt=p010
+      PRE=(-vaapi_device "$node")
+      vf="crop=$CW:$CH:$CX:$CY,format=$fmt,hwupload"
+      OPTS+=("-c:v:0" "$want" "-qp:v:0" "$QUALITY")
+      ((depth == 10)) && OPTS+=("-profile:v:0" main10)
+      mt_kv "Encoder:" "$want on $node, QP $QUALITY, $fmt" ;;
+    x265)
+      vf="crop=$CW:$CH:$CX:$CY"
+      OPTS+=("-c:v:0" libx265 "-crf:v:0" "$QUALITY" "-preset:v:0" medium "-pix_fmt:v:0" "${pix:-yuv420p}")
+      mt_kv "Encoder:" "libx265 CRF $QUALITY (CPU - slower, smaller files)" ;;
+    x264)
+      vf="crop=$CW:$CH:$CX:$CY"
+      OPTS+=("-c:v:0" libx264 "-crf:v:0" "$QUALITY" "-preset:v:0" slow "-pix_fmt:v:0" "${pix:-yuv420p}")
+      mt_kv "Encoder:" "libx264 CRF $QUALITY (CPU)" ;;
+  esac
+  [[ $ENCODER == *hevc* || $ENCODER == x265 ]] && [[ $outext != mkv ]] && OPTS+=("-tag:v:0" hvc1)
+
+  # ---- colour metadata (propagated explicitly, as the original script did) ----
+  [[ -n ${S_RANGE[$vidx]} ]] && OPTS+=("-color_range:v:0" "${S_RANGE[$vidx]}")
+  mt_color_ok space "${S_SPACE[$vidx]}" && OPTS+=("-colorspace:v:0" "${S_SPACE[$vidx]}")
+  mt_color_ok trc "${S_TRC[$vidx]}"   && OPTS+=("-color_trc:v:0" "${S_TRC[$vidx]}")
+  mt_color_ok prim "${S_PRIM[$vidx]}"  && OPTS+=("-color_primaries:v:0" "${S_PRIM[$vidx]}")
+  if [[ ${S_TRC[$vidx]} == smpte2084 || ${S_TRC[$vidx]} == arib-std-b67 ]]; then
+    mt_warn "HDR source (${S_TRC[$vidx]}): colour tags are kept, but HDR10 static metadata may not survive a hardware encode - verify the result (x265 is the safer choice)."
+  fi
+
+  # ---- stream mapping: re-encode main video, copy everything else ---------
+  MAPS+=(-map "0:$vidx")
+  local ov=1
+  for i in "${MT_VID[@]:1}"; do MAPS+=(-map "0:$i"); OPTS+=("-c:v:$ov" copy); ((ov++)); done
+  if [[ $outext == mkv ]]; then for i in "${MT_PIC[@]}"; do MAPS+=(-map "0:$i"); OPTS+=("-c:v:$ov" copy); ((ov++)); done
+  elif ((${#MT_PIC[@]} > 0)); then dropped+=("${#MT_PIC[@]} attached picture(s) - not carried into $outext"); fi
+  local oa=0
+  for i in "${MT_AUD[@]}"; do MAPS+=(-map "0:$i"); OPTS+=("-c:a:$oa" copy); ((oa++)); done
+  local os=0
+  for i in "${MT_SUB[@]}"; do
+    k=text; mt_in_list "${S_CODEC[$i]}" "subrip srt ass ssa webvtt mov_text text" || k=other
+    if [[ $outext == mkv ]]; then
+      MAPS+=(-map "0:$i")
+      if [[ ${S_CODEC[$i]} == mov_text ]]; then OPTS+=("-c:s:$os" srt); else OPTS+=("-c:s:$os" copy); fi
+      ((os++))
+    elif [[ $k == text ]]; then
+      MAPS+=(-map "0:$i"); OPTS+=("-c:s:$os" mov_text); ((os++))
+    else
+      dropped+=("subtitle #$i (${S_CODEC[$i]}) - cannot be stored in $outext; use --container mkv to keep it")
+    fi
+  done
+  if [[ $outext == mkv ]]; then for i in "${MT_ATT[@]}"; do MAPS+=(-map "0:$i"); done; fi
+  ((${#MT_DATA[@]} > 0)) && dropped+=("${#MT_DATA[@]} data stream(s) - not carried over")
+  for i in "${dropped[@]}"; do mt_kv "Not carried:" "$i"; done
+  mt_kv "Streams:" "video re-encoded (cropped); ${#MT_AUD[@]} audio + ${#MT_SUB[@]} subtitle stream(s) copied where the container allows"
+  mt_kv "Timing:" "frame timing passed through unchanged (variable frame rate preserved)"
+
+  final=$(mt_unique_path "$outdir" "$stem-cropped" ".$outext" counter)
+  mt_kv "Output:" "$final"
+  tmp=$(mt_mktemp_file "$outdir") || { mt_err "Cannot create a temporary file in $outdir"; return 1; }
+
+  CMD=("$FFMPEG" -hide_banner -nostdin -loglevel warning -stats -y "${PRE[@]}" -i "file:$abs"
+       "${MAPS[@]}" -map_metadata 0 -map_chapters 0 -vf "$vf" -fps_mode passthrough "${OPTS[@]}" -f "$muxer" "file:$tmp")
+  mt_info "  Encoding... (progress below; Ctrl+C aborts safely)"
+  "${CMD[@]}"; rc=$?
+  if ((rc != 0)); then
+    rm -f -- "$tmp"; mt_err "ENCODE FAILED (ffmpeg exit code $rc). No output written; original untouched."; return 1
+  fi
+  printf '\n'
+  # verify the result is readable and has the cropped size
+  local got; got=$("$FFPROBE" -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 -i "file:$tmp" 2>/dev/null)
+  if [[ $got != "${CW}x${CH}" ]]; then
+    rm -f -- "$tmp"; mt_err "Output reads back as '${got:-unreadable}', expected ${CW}x${CH}; discarded."; return 1
+  fi
+  mt_commit "$tmp" "$final" || { mt_err "Could not move the result into place: $final"; return 1; }
+  mt_ok "ENCODE COMPLETE: $final  (${CW}x${CH})"
+  return 0
+}
+
+N_FAIL=0
+for f in "${FILES[@]}"; do
+  process_file "$f" || ((N_FAIL++))
+  [[ -n ${WORK:-} && -d ${WORK:-} ]] && { rm -rf -- "$WORK"; WORK=""; }
+done
+wait 2>/dev/null
+mt_banner "Summary"
+mt_info "  files: ${#FILES[@]}   failed: $N_FAIL"
+if ((N_FAIL > 0)); then exit 1; fi
+exit "$EXIT_WORST"
