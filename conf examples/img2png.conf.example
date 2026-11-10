@@ -1,3 +1,0 @@
-# Copy to ~/.config/media-tools/img2png.conf
-# GIMP_BIN=gimp-console     # default: gimp-console if present, else gimp
-GIMP_TIMEOUT=300

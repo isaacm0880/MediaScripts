@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Service
-Name=Prepare for DaVinci Resolve (resolve-prep)
+Name=Convert for DaVinci Resolve
 Comment=Choose what to convert (audio / video / both / analyse) for DaVinci Resolve
 Icon=video-x-generic
 MimeType=video/x-matroska;video/mp4;video/quicktime;video/webm;video/x-msvideo;video/mpeg;video/mp2t;video/x-flv;video/x-ms-wmv;video/ogg;
@@ -9,11 +9,11 @@ X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 X-KDE-Priority=TopLevel
 
 [Desktop Action ResolvePrep]
-Name=Prepare for DaVinci Resolve - choose what to convert (v2)
+Name=Convert for DaVinci Resolve
 Icon=video-x-generic
-Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-prep --pause %F
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-convert --pause %F
 
 [Desktop Action ResolvePrepAnalyze]
-Name=Analyse for DaVinci Resolve - recommend only (v2)
+Name=Analyse for DaVinci Resolve
 Icon=document-preview
-Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-prep --analyze --pause %F
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-convert --analyze --pause %F

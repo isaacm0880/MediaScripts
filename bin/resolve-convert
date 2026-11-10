@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# resolve-prep - make media importable by DaVinci Resolve Studio on Linux.
+# resolve-convert - make media importable by DaVinci Resolve Studio on Linux.
 #
 # YOU choose what gets converted (audio only / video only / both / analyse only),
 # either from the interactive menu or with --audio-only / --video-only / --both /
@@ -21,7 +21,7 @@ source "$ROOT/lib/common.sh" || { echo "cannot load $ROOT/lib/common.sh" >&2; ex
 
 usage() {
   cat <<'EOF'
-Usage: resolve-prep [mode] [options] [--] FILE...
+Usage: resolve-convert [mode] [options] [--] FILE...
 
 Mode (if none is given, an interactive menu asks - nothing is ever chosen for you):
       --audio-only    convert audio to PCM, COPY the video untouched
@@ -57,8 +57,8 @@ choosing a mode in the menu you may apply it to all remaining files.
 Exit status: 0 all fine, 1 at least one failure, 2 usage error / missing dependency
 / cannot ask a question without a terminal.
 
-Config file (optional, plain shell assignments, see config/resolve-prep.conf.example):
-  ${XDG_CONFIG_HOME:-~/.config}/media-tools/resolve-prep.conf
+Config file (optional, plain shell assignments, see config-examples/resolve-convert.conf.example):
+  ${XDG_CONFIG_HOME:-~/.config}/media-tools/resolve-convert.conf
 EOF
 }
 
@@ -66,7 +66,7 @@ EOF
 CFG_VARS=(FFMPEG FFPROBE PCM_BITS PREFER_LANG SUBS CONTAINER VIDEO_TARGET
   AUDIO_COPY_CODECS VIDEO_COPY_CODECS VIDEO_UNKNOWN_CODECS MOV_VIDEO_OK MOV_AUDIO_OK
   REMUX_EXTS SUB_TEXT_CODECS SUB_BITMAP_CODECS OUT_SUFFIX OUT_DIR CFR_RATE)
-mt_load_config resolve-prep "${CFG_VARS[@]}"
+mt_load_config resolve-convert "${CFG_VARS[@]}"
 
 : "${FFMPEG:=ffmpeg}"
 : "${FFPROBE:=ffprobe}"
@@ -116,7 +116,7 @@ while (($#)); do
     --pick)          PICK=1; shift ;;
     --pause)         MT_PAUSE=1; shift ;;
     -h|--help)       usage; exit 0 ;;
-    --version)       echo "resolve-prep $MT_VERSION"; exit 0 ;;
+    --version)       echo "resolve-convert $MT_VERSION"; exit 0 ;;
     --)              shift; FILES+=("$@"); break ;;
     -*)              mt_err "Unknown option: $1"; usage >&2; exit 2 ;;
     *)               FILES+=("$1"); shift ;;
@@ -408,7 +408,7 @@ process_file() {
         ((remux)) && mt_info "  Note: $remux_why - even with 'no conversion', a stream-copy remux would be needed (--audio-only does that)."
         mt_info "  Metadata cannot prove an import will work; this is advice, not a decision."
         if [[ $rec != none ]]; then
-          mt_info "  To act on it:  resolve-prep --${rec} $(printf '%q' "$arg")"
+          mt_info "  To act on it:  resolve-convert --${rec} $(printf '%q' "$arg")"
         fi
         if ((MODE_FROM_CLI)); then return 3; fi
         continue ;;

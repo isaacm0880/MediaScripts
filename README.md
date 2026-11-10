@@ -1,14 +1,20 @@
 # MediaScripts
 
-**Image conversion, DaVinci Resolve preparation, and automatic black-bar cropping for Linux.**
+A bunch of scripts I've found handy for working with media files and DaVinci on Linux.
 
-Three independent Bash tools designed for KDE Plasma 6 on CachyOS/Arch Linux. Use them from the terminal, Dolphin's right-click menu, or the application launcher. No background services.
+A collection of Bash tools designed for KDE Plasma 6 on CachyOS/Arch Linux. Use them from the terminal, Dolphin's right-click menu, or the application launcher. No background services.
 
 | Tool | Purpose | Typical output |
 | --- | --- | --- |
-| `img2png` | Convert images (including GIMP XCF) to PNG | `photo.png` |
-| `resolve-prep` | Convert audio and/or video to editing-friendly formats | MOV or MKV with PCM audio and/or DNxHR video |
-| `crop-bars` | Detect, preview and remove black bars | Cropped video with audio/subtitles copied |
+| `image-to-png` | Convert images (including GIMP XCF) to PNG | `photo.png` |
+| `resolve-convert` | Convert audio and/or video to editing-friendly formats | MOV or MKV with PCM audio and/or DNxHR video |
+| `video-remove-borders` | Detect, preview and remove black bars from video | Cropped video with audio/subtitles copied |
+| `audio-extract-cover` | Extract embedded cover art from audio | PNG |
+| `audio-extract-square-cover` | Extract square cover art from audio | JPEG |
+| `image-remove-borders` | Trim uniform borders from images | Cropped image |
+| `resolve-keyboard-fix` | Toggle KDE appmenu workaround for Resolve shortcuts | KDE module state |
+
+The KDE application launcher groups the four graphical shortcuts in a **Media Tools** folder. Dolphin right-click actions remain available on matching files.
 
 ## Installation
 
@@ -20,7 +26,7 @@ Arch/CachyOS:
 sudo pacman -S --needed bash python ffmpeg imagemagick file kdialog konsole
 ```
 
-Optional: `gimp` (GIMP 3 for XCF files), `libavif` and `libwebp` (dedicated AVIF/WebP decoders), `libva-mesa-driver` and `libva-utils` (AMD VA-API encoding). `crop-bars --encoder x264` or `x265` works without VA-API.
+Optional: `gimp` (GIMP 3 for XCF files), `libavif` and `libwebp` (dedicated AVIF/WebP decoders), `libva-mesa-driver` and `libva-utils` (AMD VA-API encoding). `video-remove-borders --encoder x264` or `x265` works without VA-API.
 
 ### One-command installer
 
@@ -38,7 +44,7 @@ The default destination is `~/.local/opt/media-tools`. To choose another directo
 bash install.sh --prefix ~/Custom/Scripts/media-tools
 ```
 
-The installer copies the scripts and example configuration, updates the absolute paths in KDE desktop entries, and installs:
+The installer copies all seven tools and example configuration, updates the absolute paths in KDE desktop entries, and installs:
 
 | Component | Destination |
 | --- | --- |
@@ -64,18 +70,42 @@ git pull --ff-only
 bash install.sh
 ```
 
-For a custom installation, use `bash install.sh --prefix /your/existing/path` again. The installer backs up files it replaces. It doesn't remove unrelated scripts or old context-menu entries.
+For a custom installation, use `bash install.sh --prefix /your/existing/path` again. The installer backs up files it replaces. It preserves user configuration and backs up superseded example files and old managed menu entries.
+
+## Configuration
+
+The three configurable tools load optional Bash configuration files from
+`${XDG_CONFIG_HOME:-$HOME/.config}/media-tools/`. The examples are stored in
+`config-examples/` and installed to `<prefix>/config-examples/`.
+
+| Tool | Example | Active configuration |
+| --- | --- | --- |
+| `image-to-png` | `image-to-png.conf.example` | `~/.config/media-tools/image-to-png.conf` |
+| `resolve-convert` | `resolve-convert.conf.example` | `~/.config/media-tools/resolve-convert.conf` |
+| `video-remove-borders` | `video-remove-borders.conf.example` | `~/.config/media-tools/video-remove-borders.conf` |
+
+Copy only the example you want to customise. For example:
+
+```bash
+mkdir -p ~/.config/media-tools
+cp config-examples/video-remove-borders.conf.example ~/.config/media-tools/video-remove-borders.conf
+```
+
+The installer **does not overwrite active user configuration**. The old config filenames
+(`img2png.conf`, `resolve-prep.conf`, `crop-bars.conf`) are not read by the
+renamed tools; copy your settings into the corresponding new filenames if needed.
+Environment variables and command-line options take precedence over the config file.
 
 ## Usage
 
-### img2png — image to PNG
+### image-to-png — image to PNG
 
 ```bash
-img2png "photo.webp"
-img2png *.jpg *.xcf
-img2png -o ~/Pictures/converted "image.avif"
-img2png --skip-existing *.tif
-img2png --pick
+image-to-png "photo.webp"
+image-to-png *.jpg *.xcf
+image-to-png -o ~/Pictures/converted "image.avif"
+image-to-png --skip-existing *.tif
+image-to-png --pick
 ```
 
 - Identifies images by content rather than trusting the filename extension.
@@ -84,19 +114,19 @@ img2png --pick
 - Preserves transparency where supported; exports the first frame/page of animated or multipage formats.
 - Doesn't overwrite existing output by default. Use `--overwrite` only when intentional.
 
-### resolve-prep — DaVinci Resolve conversion
+### resolve-convert — DaVinci Resolve conversion
 
 Choose what to convert. Codec analysis provides advice; it doesn't override your selected mode.
 
 ```bash
-resolve-prep "video.mkv"                    # Interactive mode selection
-resolve-prep --analyze "video.mkv"          # Inspect only
-resolve-prep --audio-only "video.mkv"       # PCM audio, copy video
-resolve-prep --video-only "video.mkv"       # DNxHR video, copy audio
-resolve-prep --both "video.mkv"             # Convert both
-resolve-prep --audio-only --dry-run "video.mkv"
-resolve-prep --both --yes "video.mkv"       # Skip CLI confirmation
-resolve-prep --prefer-lang eng,jpn --subs sidecar -o ~/Videos/out --audio-only "video.mkv"
+resolve-convert "video.mkv"                    # Interactive mode selection
+resolve-convert --analyze "video.mkv"          # Inspect only
+resolve-convert --audio-only "video.mkv"       # PCM audio, copy video
+resolve-convert --video-only "video.mkv"       # DNxHR video, copy audio
+resolve-convert --both "video.mkv"             # Convert both
+resolve-convert --audio-only --dry-run "video.mkv"
+resolve-convert --both --yes "video.mkv"       # Skip CLI confirmation
+resolve-convert --prefer-lang eng,jpn --subs sidecar -o ~/Videos/out --audio-only "video.mkv"
 ```
 
 | Mode | Video | Audio |
@@ -112,31 +142,50 @@ The default container is MOV; if a copied stream is incompatible with MOV, the t
 
 **Important:** Resolve compatibility depends on codec, pixel format, hardware and Resolve version. The tool's assessment is guidance, not a guarantee. DNxHR output can be much larger than the source. See `--help` for all options.
 
-### crop-bars — detect and remove black bars
+### video-remove-borders — detect and remove black bars
 
 ```bash
-crop-bars --analyze "film.mkv"                   # Detect only
-crop-bars "film.mkv"                             # Preview, then confirm
-crop-bars --yes "film.mkv"                       # Encode validated crop
-crop-bars --crop 1920:800:0:140 "film.mkv"        # Manual W:H:X:Y
-crop-bars --bars 0,140,0,140 "film.mkv"           # Manual L,T,R,B
-crop-bars --encoder x265 --quality 20 "film.mkv" # CPU encoding
+video-remove-borders --analyze "film.mkv"                   # Detect only
+video-remove-borders "film.mkv"                             # Preview, then confirm
+video-remove-borders --yes "film.mkv"                       # Encode validated crop
+video-remove-borders --crop 1920:800:0:140 "film.mkv"        # Manual W:H:X:Y
+video-remove-borders --bars 0,140,0,140 "film.mkv"           # Manual L,T,R,B
+video-remove-borders --encoder x265 --quality 20 "film.mkv" # CPU encoding
 ```
 
 The detector samples multiple timestamps, compares bar measurements and independently validates the proposed crop. It uses a conservative safety margin and reports **VALIDATED**, **AMBIGUOUS**, or **NONE**. Preview images are saved under `~/.cache/media-tools/previews/`; review them before encoding.
 
 Default encoding uses AMD HEVC VA-API at QP 18. CPU `x264` and `x265` are alternatives. Audio and subtitle streams are copied where supported. Hardware encoding may not preserve all HDR metadata.
 
-## Configuration
+## More handy scripts
 
-The optional configuration examples live in `conf examples/`. Copy only those you need to `~/.config/media-tools/`, removing the `.example` suffix:
+### Extract embedded audio artwork
 
 ```bash
-mkdir -p ~/.config/media-tools
-cp "conf examples/resolve-prep.conf.example" ~/.config/media-tools/resolve-prep.conf
+audio-extract-cover "album.flac"
+audio-extract-cover *.mp3
+audio-extract-square-cover "album.flac"
 ```
 
-There are corresponding examples for `img2png` and `crop-bars`. Review their comments before editing.
+`audio-extract-cover` saves embedded cover artwork as a PNG next to the audio file. If an output exists, its KDE dialog asks whether to overwrite it; extraction uses a temporary file so a failed conversion does not delete the original output. It selects streams marked as attached pictures. `audio-extract-square-cover` selects an attached picture, centre-crops it to a square and saves a high-quality JPEG. It refuses to overwrite an existing thumbnail.
+
+### Remove image borders
+
+```bash
+image-remove-borders "screenshot.png"
+```
+
+Trims uniform-colour borders using ImageMagick and saves a separate `-cropped` image. It never overwrites an existing output and reports when no border is detected. This is for **images**, unlike `video-remove-borders`, which handles **videos**. Inspect the result: `-trim` can remove intentional same-colour margins.
+
+### Resolve keyboard shortcut workaround
+
+Launch **DaVinci Resolve Keyboard Fix** from the application menu, or run:
+
+```bash
+resolve-keyboard-fix
+```
+
+This opens a KDE dialog to unload or reload the `appmenu` module. The script checks whether the D-Bus operation succeeds before reporting success. **This changes KDE's appmenu module for the desktop session, not only Resolve.** Requires `kdialog` and `qdbus6`.
 
 ## Testing
 
@@ -154,19 +203,25 @@ The suite checks representative conversion, output naming, validation and failur
 MediaScripts/
 ├── install.sh
 ├── bin/
-│   ├── img2png
-│   ├── resolve-prep
-│   └── crop-bars
+│   ├── image-to-png
+│   ├── resolve-convert
+│   ├── video-remove-borders
+│   ├── audio-extract-cover
+│   ├── audio-extract-square-cover
+│   ├── image-remove-borders
+│   └── resolve-keyboard-fix
 ├── lib/
 │   ├── common.sh
 │   └── run-tests.sh
-├── conf examples/
-│   ├── img2png.conf.example
-│   ├── resolve-prep.conf.example
-│   └── crop-bars.conf.example
-├── desktops/             # Dolphin service menus
-└── launchers/             # Application menu launchers
+├── config-examples/
+│   ├── image-to-png.conf.example
+│   ├── resolve-convert.conf.example
+│   └── video-remove-borders.conf.example
+├── desktops/             # Dolphin service menus (six entries)
+└── launchers/             # Application menu launchers (four entries)
 ```
+
+The previous commands (`img2png`, `resolve-prep`, `crop-bars`, `remove-black-bars`, `extract-audio-artwork`, and `extract-square-thumbnail`) remain available as compatibility aliases. The installer backs up and retires its older KDE menu entries to avoid duplicates.
 
 ## Notes and limitations
 

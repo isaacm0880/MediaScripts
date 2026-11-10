@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Convert Images to PNG
+Comment=Choose images, convert to PNG
+Icon=image-x-generic
+Categories=MediaTools;
+Terminal=false
+StartupNotify=false
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/image-to-png --pick --pause

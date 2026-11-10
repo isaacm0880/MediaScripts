@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# img2png - convert images (including layered GIMP XCF) to PNG.
+# image-to-png - convert images (including layered GIMP XCF) to PNG.
 #
 # The input format is detected from the file CONTENT (libmagic), never from the
 # extension.  A converter is chosen per detected format:
@@ -19,7 +19,7 @@ source "$ROOT/lib/common.sh" || { echo "cannot load $ROOT/lib/common.sh" >&2; ex
 
 usage() {
   cat <<'EOF'
-Usage: img2png [options] [--] FILE...
+Usage: image-to-png [options] [--] FILE...
 
 Convert images to PNG. Format is detected from the file contents.
 
@@ -38,13 +38,13 @@ Exit status: 0 all converted/skipped, 1 at least one failure, 2 usage or
 missing dependency.
 
 Config file (optional, plain shell assignments):
-  ${XDG_CONFIG_HOME:-~/.config}/media-tools/img2png.conf
+  ${XDG_CONFIG_HOME:-~/.config}/media-tools/image-to-png.conf
   variables: MAGICK GIMP_BIN GIMP_TIMEOUT OUT_DIR
 EOF
 }
 
 CFG_VARS=(MAGICK GIMP_BIN GIMP_TIMEOUT OUT_DIR)
-mt_load_config img2png "${CFG_VARS[@]}"
+mt_load_config image-to-png "${CFG_VARS[@]}"
 : "${MAGICK:=magick}"
 : "${GIMP_BIN:=}"
 : "${GIMP_TIMEOUT:=300}"
@@ -65,7 +65,7 @@ while (($#)); do
     --pick)          PICK=1; shift ;;
     --pause)         MT_PAUSE=1; shift ;;
     -h|--help)       usage; exit 0 ;;
-    --version)       echo "img2png $MT_VERSION"; exit 0 ;;
+    --version)       echo "image-to-png $MT_VERSION"; exit 0 ;;
     --)              shift; FILES+=("$@"); break ;;
     -*)              mt_err "Unknown option: $1"; usage >&2; exit 2 ;;
     *)               FILES+=("$1"); shift ;;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# crop-bars - detect and remove GENUINE black bars (letterbox / pillarbox /
+# video-remove-borders - detect and remove GENUINE black bars (letterbox / pillarbox /
 # both) from a video, conservatively.
 #
 # How the decision is made (details in README):
@@ -28,7 +28,7 @@ source "$ROOT/lib/common.sh" || { echo "cannot load $ROOT/lib/common.sh" >&2; ex
 
 usage() {
   cat <<'EOF'
-Usage: crop-bars [options] [--] FILE...
+Usage: video-remove-borders [options] [--] FILE...
 
 Default: analyse, show the report and a preview, then ask before encoding.
 
@@ -62,7 +62,7 @@ Encoding:
 Exit status: 0 done / no bars / analysis finished, 1 failure, 2 usage or missing
 dependency, 3 left UNCHANGED because the result was ambiguous or unconfirmed.
 
-Config file (optional): ${XDG_CONFIG_HOME:-~/.config}/media-tools/crop-bars.conf
+Config file (optional): ${XDG_CONFIG_HOME:-~/.config}/media-tools/video-remove-borders.conf
 EOF
 }
 
@@ -70,7 +70,7 @@ EOF
 CFG_VARS=(FFMPEG FFPROBE SAMPLES LIMIT TOL MIN_SUPPORT SAFETY_PX ROUND MIN_BAR_PX FRAMES_PER_SAMPLE
   DARK_YAVG MIN_VALID VALIDATE_POINTS VALIDATE_YMAX MAX_REMOVED ENCODER QUALITY RENDER_NODE
   PREVIEW_COUNT OUT_DIR)
-mt_load_config crop-bars "${CFG_VARS[@]}"
+mt_load_config video-remove-borders "${CFG_VARS[@]}"
 : "${FFMPEG:=ffmpeg}"; : "${FFPROBE:=ffprobe}"
 : "${SAMPLES:=16}"            # detection sample points
 : "${LIMIT:=24}"              # cropdetect luma threshold (8-bit scale)
@@ -118,7 +118,7 @@ while (($#)); do
     --pick)              PICK=1; shift ;;
     --pause)             MT_PAUSE=1; shift ;;
     -h|--help)           usage; exit 0 ;;
-    --version)           echo "crop-bars $MT_VERSION"; exit 0 ;;
+    --version)           echo "video-remove-borders $MT_VERSION"; exit 0 ;;
     --)                  shift; FILES+=("$@"); break ;;
     -*)                  mt_err "Unknown option: $1"; usage >&2; exit 2 ;;
     *)                   FILES+=("$1"); shift ;;
@@ -425,11 +425,11 @@ process_file() {
   if ((ANALYZE)); then
     mt_info "  Analysis only (--analyze): nothing encoded."
     if [[ $status == AMBIGUOUS ]] && ((L + T + R + B == 0)); then
-      mt_info "  The conservative result is NO crop. To crop anyway, give the rectangle yourself: crop-bars --crop W:H:X:Y FILE"
+      mt_info "  The conservative result is NO crop. To crop anyway, give the rectangle yourself: video-remove-borders --crop W:H:X:Y FILE"
     elif [[ $status == AMBIGUOUS ]]; then
-      mt_info "  To proceed anyway:  crop-bars --crop ${CW}:${CH}:${CX}:${CY} FILE   (conservative suggestion)"
+      mt_info "  To proceed anyway:  video-remove-borders --crop ${CW}:${CH}:${CX}:${CY} FILE   (conservative suggestion)"
     else
-      mt_info "  To encode this crop:  crop-bars --yes FILE"
+      mt_info "  To encode this crop:  video-remove-borders --yes FILE"
     fi
     return 0
   fi
