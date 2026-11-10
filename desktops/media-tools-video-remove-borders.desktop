@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Service
+Remove Video Black Bars
+Comment=Detect black bars, preview, confirm, then crop
+Icon=transform-crop
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/x-flv;video/mp2t;
+Actions=CropBars
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-Priority=TopLevel
+
+[Desktop Action CropBars]
+Remove Video Black Bars
+Icon=transform-crop
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/video-remove-borders --preview --open --pause %F
