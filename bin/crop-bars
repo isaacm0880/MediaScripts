@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# Backwards-compatible alias for video-remove-borders.
-exec "$(dirname -- "${BASH_SOURCE[0]}")/video-remove-borders" "$@"
