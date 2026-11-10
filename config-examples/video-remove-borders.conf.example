@@ -1,0 +1,21 @@
+# Optional configuration for video-remove-borders
+# Copy to ${XDG_CONFIG_HOME:-$HOME/.config}/media-tools/video-remove-borders.conf
+# Bash assignments. CLI > environment > config > built-in defaults.
+ENCODER=vaapi-hevc                # vaapi-hevc | vaapi-h264 | x265 | x264
+# QUALITY=18                     # unset uses encoder-specific default
+# RENDER_NODE=/dev/dri/renderD128 # unset: auto-detect AMD render node
+SAMPLES=16
+LIMIT=24                         # cropdetect luma threshold
+TOL=4                            # pixel tolerance
+MIN_SUPPORT=0.7
+SAFETY_PX=2
+ROUND=2
+MIN_BAR_PX=8
+FRAMES_PER_SAMPLE=8
+DARK_YAVG=30
+MIN_VALID=6
+VALIDATE_POINTS=6
+VALIDATE_YMAX=48
+MAX_REMOVED=0.6
+PREVIEW_COUNT=3
+# OUT_DIR="$HOME/Videos/cropped"
