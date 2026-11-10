@@ -1,7 +1,0 @@
-# Copy to ~/.config/media-tools/crop-bars.conf
-ENCODER=vaapi-hevc      # vaapi-hevc | vaapi-h264 | x265 | x264
-QUALITY=18
-# RENDER_NODE=/dev/dri/renderD128   # leave unset to auto-detect the amdgpu node
-SAMPLES=16
-MIN_SUPPORT=0.7
-SAFETY_PX=2
