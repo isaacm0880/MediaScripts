@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# image-to-png - convert images (including layered GIMP XCF) to PNG.
+#
+# The input format is detected from the file CONTENT (libmagic), never from the
+# extension.  A converter is chosen per detected format:
+#   XCF            -> GIMP 3 batch mode (Python-Fu)       [package: gimp]
+#   AVIF           -> avifdec (libavif), else ImageMagick  [libavif / imagemagick]
+#   WebP           -> dwebp (libwebp),  else ImageMagick   [libwebp / imagemagick]
+#   everything else (JPEG, TIFF, BMP, GIF, HEIC, JP2, JXL, PSD, TGA, ICO, PNM)
+#                  -> ImageMagick 7 (`magick`)             [imagemagick]
+# Originals are never modified.  Output: <name>.png beside the input (or in
+# --out-dir); an existing file is never overwritten unless --overwrite is given.
+set -u -o pipefail
+
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+ROOT=$(dirname "$(dirname "$SELF")")
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" || { echo "cannot load $ROOT/lib/common.sh" >&2; exit 2; }
+
+usage() {
+  cat <<'EOF'
+Usage: image-to-png [options] [--] FILE...
+
+Convert images to PNG. Format is detected from the file contents.
+
+Options:
+  -o, --out-dir DIR   write PNGs into DIR instead of beside each input
+      --skip-existing do nothing for an input whose <name>.png already exists
+      --overwrite     replace an existing <name>.png (never the input itself)
+      --pick          choose the input files with a KDE file dialog (kdialog)
+      --pause         wait for Enter before the terminal closes (used by launchers)
+  -h, --help          show this help
+      --version
+
+Default when <name>.png already exists: write "<name> (2).png" instead.
+
+Exit status: 0 all converted/skipped, 1 at least one failure, 2 usage or
+missing dependency.
+
+Config file (optional, plain shell assignments):
+  ${XDG_CONFIG_HOME:-~/.config}/media-tools/image-to-png.conf
+  variables: MAGICK GIMP_BIN GIMP_TIMEOUT OUT_DIR
+EOF
+}
+
+CFG_VARS=(MAGICK GIMP_BIN GIMP_TIMEOUT OUT_DIR)
+mt_load_config image-to-png "${CFG_VARS[@]}"
+: "${MAGICK:=magick}"
+: "${GIMP_BIN:=}"
+: "${GIMP_TIMEOUT:=300}"
+: "${OUT_DIR:=}"
+
+ON_EXISTING=rename   # rename | skip | overwrite
+PICK=0
+FILES=()
+
+while (($#)); do
+  case $1 in
+    --*=*) set -- "${1%%=*}" "${1#*=}" "${@:2}" ;;
+  esac
+  case $1 in
+    -o|--out-dir)    [[ $# -ge 2 ]] || mt_die 2 "$1 needs a value"; OUT_DIR=$2; shift 2 ;;
+    --skip-existing) ON_EXISTING=skip; shift ;;
+    --overwrite)     ON_EXISTING=overwrite; shift ;;
+    --pick)          PICK=1; shift ;;
+    --pause)         MT_PAUSE=1; shift ;;
+    -h|--help)       usage; exit 0 ;;
+    --version)       echo "image-to-png $MT_VERSION"; exit 0 ;;
+    --)              shift; FILES+=("$@"); break ;;
+    -*)              mt_err "Unknown option: $1"; usage >&2; exit 2 ;;
+    *)               FILES+=("$1"); shift ;;
+  esac
+done
+
+mt_install_traps
+
+if ((PICK)); then
+  mt_pick_files "Choose images to convert to PNG" \
+    "*.xcf *.jpg *.jpeg *.webp *.avif *.tif *.tiff *.bmp *.gif *.heic *.heif *.jp2 *.jxl *.psd *.tga *.ico | Images" \
+    || { mt_info "No files chosen."; exit 0; }
+  FILES+=("${MT_PICKED[@]}")
+fi
+if ((${#FILES[@]} == 0)); then usage >&2; exit 2; fi
+
+# `file` and ImageMagick are needed for every run; the others only when used.
+mt_need file file
+mt_need "$MAGICK" imagemagick
+mt_deps_or_die
+
+# ---------------------------------------------------------------- helpers ---
+
+# detect_mime FILE -> MIME type from content. XCF is also checked by its magic
+# bytes so detection does not depend on the installed libmagic database.
+detect_mime() {
+  local f=$1 magic
+  magic=$(head -c 9 -- "$f" 2>/dev/null | tr -d '\0')
+  if [[ $magic == "gimp xcf " ]]; then echo image/x-xcf; return; fi
+  file --brief --mime-type -- "$f" 2>/dev/null || echo unknown
+}
+
+GIMP_CHECKED=0
+GIMP_OK=0
+gimp_ready() {
+  ((GIMP_CHECKED)) && return $((GIMP_OK ? 0 : 1))
+  GIMP_CHECKED=1
+  local cand v
+  if [[ -z $GIMP_BIN ]]; then
+    for cand in gimp-console gimp; do
+      command -v "$cand" >/dev/null 2>&1 && { GIMP_BIN=$cand; break; }
+    done
+  fi
+  if [[ -z $GIMP_BIN ]] || ! command -v "$GIMP_BIN" >/dev/null 2>&1; then
+    mt_err "GIMP is required for XCF files but was not found (sudo pacman -S gimp)."
+    return 1
+  fi
+  v=$(timeout 30 "$GIMP_BIN" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
+  if [[ -z $v || ${v%%.*} -lt 3 ]]; then
+    mt_err "GIMP 3.x is required (found '${v:-unknown}' via '$GIMP_BIN'): the batch code uses the GIMP 3 Python API."
+    return 1
+  fi
+  GIMP_OK=1
+  return 0
+}
+
+# Converters. Each takes ABS_INPUT OUT_TMP_PNG PREFIX and returns 0 on success.
+# Paths reach external programs as arguments or environment variables only -
+# they are never interpolated into code or shell strings.
+conv_gimp() {
+  local in=$1 out=$2 log=$3
+  # Static one-line Python program: the paths come from the environment.
+  local py='import os; from gi.repository import Gimp, Gio; img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(os.environ["MT_IN"])); Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, img, Gio.File.new_for_path(os.environ["MT_OUT"]), None); Gimp.quit(0)'
+  MT_IN=$in MT_OUT=$out timeout --kill-after=10 "$GIMP_TIMEOUT" \
+    "$GIMP_BIN" --no-splash --no-interface --batch-interpreter=python-fu-eval -b "$py" --quit \
+    >"$log" 2>&1
+}
+conv_avifdec() { avifdec "$1" "$2" >"$3" 2>&1; }
+conv_dwebp()   { dwebp -quiet "$1" -o "$2" >"$3" 2>&1; }
+conv_magick()  {
+  # "<format>:<abs path>[0]" - explicit format prefix stops ImageMagick from
+  # guessing by extension or interpreting special filename syntax; [0] selects
+  # the first frame/page (the composite for PSD).
+  "$MAGICK" -quiet "$4:$1[0]" -auto-orient "PNG:$2" >"$3" 2>&1
+}
+
+# handlers_for MIME -> sets HANDLERS (ordered) and IM_PREFIX and NOTE
+handlers_for() {
+  HANDLERS=(); IM_PREFIX=""; NOTE=""
+  case $1 in
+    image/x-xcf)                    HANDLERS=(gimp) ;;
+    image/avif)                     HANDLERS=(avifdec magick); IM_PREFIX=avif ;;
+    image/webp)                     HANDLERS=(dwebp magick);   IM_PREFIX=webp; NOTE="animated WebP: first frame only" ;;
+    image/jpeg)                     HANDLERS=(magick); IM_PREFIX=jpeg ;;
+    image/tiff)                     HANDLERS=(magick); IM_PREFIX=tiff; NOTE="multi-page TIFF: first page only" ;;
+    image/bmp|image/x-ms-bmp)       HANDLERS=(magick); IM_PREFIX=bmp ;;
+    image/gif)                      HANDLERS=(magick); IM_PREFIX=gif;  NOTE="animated GIF: first frame only" ;;
+    image/heic|image/heif|image/heic-sequence|image/heif-sequence)
+                                    HANDLERS=(magick); IM_PREFIX=heic ;;
+    image/jp2)                      HANDLERS=(magick); IM_PREFIX=jp2 ;;
+    image/jxl)                      HANDLERS=(magick); IM_PREFIX=jxl ;;
+    image/vnd.adobe.photoshop)      HANDLERS=(magick); IM_PREFIX=psd;  NOTE="PSD: flattened composite" ;;
+    image/x-tga|image/x-targa)      HANDLERS=(magick); IM_PREFIX=tga ;;
+    image/vnd.microsoft.icon|image/x-icon) HANDLERS=(magick); IM_PREFIX=ico; NOTE="ICO: first image only" ;;
+    image/x-portable-*)             HANDLERS=(magick); IM_PREFIX=pnm ;;
+    *)                              return 1 ;;
+  esac
+}
+
+handler_available() {
+  case $1 in
+    gimp)    return 0 ;;                       # checked lazily by gimp_ready
+    avifdec) command -v avifdec >/dev/null 2>&1 ;;
+    dwebp)   command -v dwebp   >/dev/null 2>&1 ;;
+    magick)  command -v "$MAGICK" >/dev/null 2>&1 ;;
+  esac
+}
+
+# ----------------------------------------------------------------- main ---
+n_ok=0; n_skip=0; n_fail=0; xcf_note_shown=0
+
+convert_one() {
+  local arg=$1 abs mime dir stem outdir final tmpdir out log h ok=0 how=""
+  local -a tried=()
+
+  if [[ ! -e $arg ]]; then mt_err "Not found: $arg"; return 1; fi
+  if [[ ! -f $arg ]]; then mt_err "Not a regular file: $arg"; return 1; fi
+  if [[ ! -r $arg ]]; then mt_err "Not readable: $arg"; return 1; fi
+  abs=$(realpath -e -- "$arg") || { mt_err "Cannot resolve path: $arg"; return 1; }
+
+  mime=$(detect_mime "$abs")
+  mt_banner "$(basename -- "$abs")"
+  mt_kv "Detected:" "$mime"
+
+  case $mime in
+    image/png)
+      mt_info "  Already a PNG - skipped (nothing to convert)."; return 3 ;;
+  esac
+  if ! handlers_for "$mime"; then
+    mt_err "Unsupported or non-image format ($mime): $arg"
+    case $mime in
+      application/gzip|application/x-bzip2|application/x-xz|application/zip)
+        mt_info "  Compressed file: decompress it first (e.g. .xcf.gz -> .xcf)." ;;
+      image/svg+xml)
+        mt_info "  SVG is vector art; rasterise with: rsvg-convert -o out.png file.svg" ;;
+    esac
+    return 1
+  fi
+
+  outdir=${OUT_DIR:-$(dirname -- "$abs")}
+  if [[ ! -d $outdir || ! -w $outdir ]]; then
+    mt_err "Output directory is missing or not writable: $outdir"; return 1
+  fi
+  dir=$outdir
+  stem=$(mt_stem "$(basename -- "$abs")")
+  final="$dir/$stem.png"
+
+  case $ON_EXISTING in
+    skip)
+      if [[ -e $final || -L $final ]]; then
+        mt_info "  Output exists - skipped: $final"; return 3
+      fi ;;
+    overwrite)
+      if [[ $final -ef $abs ]]; then
+        mt_err "Refusing to overwrite the input file itself: $abs"; return 1
+      fi ;;
+    rename)
+      if [[ -e $final || -L $final ]]; then
+        local alt
+        alt=$(mt_unique_path "$dir" "$stem" ".png" counter)
+        mt_warn "'$final' already exists; writing '$alt' instead."
+        final=$alt
+      fi ;;
+  esac
+
+  [[ -n $NOTE ]] && mt_kv "Note:" "$NOTE"
+  if [[ $mime == image/x-xcf && $xcf_note_shown == 0 ]]; then
+    mt_kv "Note:" "layered XCF -> PNG is the VISIBLE COMPOSITE (hidden layers excluded), not separate layers."
+    xcf_note_shown=1
+  fi
+
+  tmpdir=$(mt_mktemp_dir "$dir") || { mt_err "Cannot create a temporary directory in $dir"; return 1; }
+  out="$tmpdir/out.png"; log="$tmpdir/tool.log"
+
+  for h in "${HANDLERS[@]}"; do
+    handler_available "$h" || continue
+    if [[ $h == gimp ]]; then gimp_ready || { tried+=("gimp(unavailable)"); continue; }; fi
+    tried+=("$h")
+    rm -f -- "$out"
+    case $h in
+      gimp)    conv_gimp    "$abs" "$out" "$log" ;;
+      avifdec) conv_avifdec "$abs" "$out" "$log" ;;
+      dwebp)   conv_dwebp   "$abs" "$out" "$log" ;;
+      magick)  conv_magick  "$abs" "$out" "$log" "$IM_PREFIX" ;;
+    esac
+    local rc=$?
+    # Success means: tool exited 0 AND produced a non-empty file that really is a PNG.
+    if ((rc == 0)) && [[ -s $out && $(file --brief --mime-type -- "$out") == image/png ]]; then
+      ok=1; how=$h; break
+    fi
+    mt_warn "$h failed (exit $rc) on this file."
+    [[ -s $log ]] && tail -n 8 -- "$log" | sed 's/^/    | /' >&2
+  done
+
+  if ((!ok)); then
+    if ((${#tried[@]} == 0)); then
+      mt_err "No converter is installed for $mime. Needed: ${HANDLERS[*]}"
+      mt_info "  Install hints: gimp (XCF), imagemagick, libavif, libwebp  ->  sudo pacman -S <package>"
+    else
+      mt_err "Conversion failed (tried: ${tried[*]}): $arg"
+      [[ $mime == image/avif || $mime == image/heic || $mime == image/jxl || $mime == image/heif ]] && \
+        mt_info "  Your ImageMagick may lack the delegate for $mime; check:  magick -list format | grep -i ${IM_PREFIX}"
+    fi
+    return 1
+  fi
+
+  if [[ $ON_EXISTING == overwrite && -e $final ]]; then
+    mt_warn "Overwriting existing file (--overwrite): $final"
+    mv -f -- "$out" "$final" || { mt_err "Could not write $final"; return 1; }
+  else
+    mt_commit "$out" "$final" || { mt_err "Could not place output (name taken meanwhile?): $final"; return 1; }
+  fi
+  mt_ok "  OK  ($how)  ->  $final"
+  return 0
+}
+
+for f in "${FILES[@]}"; do
+  convert_one "$f"; rc=$?
+  case $rc in 0) ((n_ok++));; 3) ((n_skip++));; *) ((n_fail++));; esac
+done
+
+mt_banner "Summary"
+mt_info "  converted: $n_ok   skipped: $n_skip   failed: $n_fail"
+((n_fail == 0))
