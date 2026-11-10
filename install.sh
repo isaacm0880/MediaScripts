@@ -66,6 +66,18 @@ pathlib.Path(sys.argv[2]).write_text(source)
 PY
   chmod +x "$dest"
 done
+# Add a dedicated Media Tools folder to the KDE application menu.
+directory_dir="${XDG_DATA_HOME:-$HOME/.local/share}/desktop-directories"
+menu_dir="${XDG_CONFIG_HOME:-$HOME/.config}/menus/applications-merged"
+mkdir -p -- "$directory_dir" "$menu_dir"
+for item in "$directory_dir/media-tools.directory" "$menu_dir/media-tools.menu"; do
+  if [[ -e "$item" ]]; then
+    mkdir -p -- "$backup/kde/menu"
+    cp -a -- "$item" "$backup/kde/menu/$(basename "$item")"
+  fi
+done
+cp -- "$src/menu/media-tools.directory" "$directory_dir/media-tools.directory"
+cp -- "$src/menu/media-tools.menu" "$menu_dir/media-tools.menu"
 # Retire only known obsolete desktop entry filenames from previous installs.
 for oldname in media-tools-img2png.desktop media-tools-resolve-prep.desktop media-tools-crop-bars.desktop media-tools-remove-black-bars.desktop media-tools-extract-audio-artwork.desktop media-tools-extract-square-thumbnail.desktop; do
   if [[ -f "$service_dir/$oldname" ]] && grep -Fq "/bin/" "$service_dir/$oldname"; then
