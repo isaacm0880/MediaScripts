@@ -29,7 +29,7 @@ mkdir -p -- "$service_dir" "$app_dir"
 stamp=$(date +%Y%m%d-%H%M%S)
 backup="$prefix/.install-backups/$stamp"
 # Backup only paths we manage, without deleting unrelated user files.
-for rel in bin/image-to-png bin/resolve-convert bin/video-remove-borders bin/image-remove-borders bin/audio-extract-cover bin/audio-extract-square-cover bin/img2png bin/resolve-prep bin/crop-bars bin/remove-black-bars bin/extract-audio-artwork bin/extract-square-thumbnail bin/resolve-keyboard-fix lib/common.sh lib/run-tests.sh README.md; do
+for rel in bin/image-to-png bin/resolve-convert bin/video-remove-borders bin/image-remove-borders bin/audio-extract-cover bin/audio-extract-square-cover bin/resolve-keyboard-fix lib/common.sh lib/run-tests.sh README.md; do
   if [[ -e "$prefix/$rel" ]]; then
     mkdir -p -- "$backup/$(dirname "$rel")"
     cp -a -- "$prefix/$rel" "$backup/$rel"
@@ -40,6 +40,14 @@ for dir in bin lib; do
   cp -a -- "$src/$dir/." "$prefix/$dir/"
 done
 cp -- "$src/README.md" "$prefix/README.md"
+# Remove retired aliases only if they match the previous tiny forwarding wrappers.
+for alias in img2png resolve-prep crop-bars remove-black-bars extract-audio-artwork extract-square-thumbnail; do
+  oldfile="$prefix/bin/$alias"
+  if [[ -f "$oldfile" ]] && grep -Fq 'exec ' "$oldfile" && grep -Fq 'dirname ' "$oldfile"; then
+    mkdir -p -- "$backup/retired-aliases"
+    mv -- "$oldfile" "$backup/retired-aliases/$alias"
+  fi
+done
 chmod +x "$prefix"/bin/* "$prefix/lib/run-tests.sh"
 # Install current example configs; preserve user-created config files separately.
 mkdir -p -- "$prefix/config-examples"
