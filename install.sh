@@ -68,7 +68,7 @@ PY
 done
 # Retire only known obsolete desktop entry filenames from previous installs.
 for oldname in media-tools-img2png.desktop media-tools-resolve-prep.desktop media-tools-crop-bars.desktop media-tools-remove-black-bars.desktop media-tools-extract-audio-artwork.desktop media-tools-extract-square-thumbnail.desktop; do
-  if [[ -f "$service_dir/$oldname" ]] && grep -Fq "$old/bin/" "$service_dir/$oldname"; then
+  if [[ -f "$service_dir/$oldname" ]] && grep -Fq "/bin/" "$service_dir/$oldname"; then
     mkdir -p -- "$backup/kde/retired"
     mv -- "$service_dir/$oldname" "$backup/kde/retired/$oldname"
   fi
