@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Convert for DaVinci Resolve
+Name=Convert for DaVinci Resolve
 Comment=Pick videos, then choose audio / video / both / analyse for each
 Icon=video-x-generic
 Categories=AudioVideo;Video;
