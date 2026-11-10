@@ -57,7 +57,7 @@ choosing a mode in the menu you may apply it to all remaining files.
 Exit status: 0 all fine, 1 at least one failure, 2 usage error / missing dependency
 / cannot ask a question without a terminal.
 
-Config file (optional, plain shell assignments, see config/resolve-convert.conf.example):
+Config file (optional, plain shell assignments, see config-examples/resolve-convert.conf.example):
   ${XDG_CONFIG_HOME:-~/.config}/media-tools/resolve-convert.conf
 EOF
 }
