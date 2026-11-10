@@ -187,17 +187,6 @@ resolve-keyboard-fix
 
 This opens a KDE dialog to unload or reload the `appmenu` module. The script checks whether the D-Bus operation succeeds before reporting success. **This changes KDE's appmenu module for the desktop session, not only Resolve.** Requires `kdialog` and `qdbus6`.
 
-## Configuration
-
-The optional configuration examples live in `config-examples/`. Copy only those you need to `~/.config/media-tools/`, removing the `.example` suffix:
-
-```bash
-mkdir -p ~/.config/media-tools
-cp "config-examples/resolve-convert.conf.example" ~/.config/media-tools/resolve-convert.conf
-```
-
-There are corresponding examples for `image-to-png` and `video-remove-borders`. Review their comments before editing.
-
 ## Testing
 
 Run the bundled synthetic-media smoke tests:
