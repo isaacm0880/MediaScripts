@@ -14,6 +14,6 @@ Icon=video-x-generic
 Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-convert --pause %F
 
 [Desktop Action ResolvePrepAnalyze]
-Name=Convert for DaVinci Resolve
+Name=Analyse for DaVinci Resolve
 Icon=document-preview
 Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-convert --analyze --pause %F
