@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Service
-Convert Images to PNG
+Name=Convert Images to PNG
 Comment=Convert images and layered XCF to PNG
 Icon=image-png
 MimeType=image/x-xcf;image/jpeg;image/webp;image/avif;image/tiff;image/bmp;image/gif;image/heif;image/heic;image/jp2;image/jxl;image/vnd.adobe.photoshop;image/x-tga;
@@ -9,6 +9,6 @@ X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 X-KDE-Priority=TopLevel
 
 [Desktop Action Img2png]
-Convert Images to PNG
+Name=Convert Images to PNG
 Icon=image-png
 Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/image-to-png --pause %F
