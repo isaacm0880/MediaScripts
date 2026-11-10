@@ -1,7 +1,7 @@
 [Desktop Entry]
 Comment=Enable or disable the DaVinci Resolve keyboard shortcut fix
 Exec=/home/isaac/Custom/Scripts/media-tools/bin/resolve-keyboard-fix
-Icon=davinci-resolve
+Icon=input-keyboard
 Name=DaVinci Resolve Keyboard Fix
 NoDisplay=false
 Path=
