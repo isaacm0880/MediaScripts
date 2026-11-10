@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=image/jpeg;image/png;image/webp;image/tiff;image/bmp;image/avif;image/heic;
+Actions=RemoveBlackBars
+X-KDE-Priority=TopLevel
+
+[Desktop Action RemoveBlackBars]
+Remove Image Borders
+Icon=image-crop
+Exec=sh -c 'for f do "/home/isaac/Custom/Scripts/media-tools/bin/image-remove-borders" "$f"; done' sh %F
