@@ -1,14 +1,18 @@
 # MediaScripts
 
-**Image conversion, DaVinci Resolve preparation, and automatic black-bar cropping for Linux.**
+A bunch of scripts I've found handy for working with media files and DaVinci Resolve on Linux. I've collected them here so they're easier to install, update, and use from KDE Plasma.
 
-Three independent Bash tools designed for KDE Plasma 6 on CachyOS/Arch Linux. Use them from the terminal, Dolphin's right-click menu, or the application launcher. No background services.
+A collection of Bash tools designed for KDE Plasma 6 on CachyOS/Arch Linux. Use them from the terminal, Dolphin's right-click menu, or the application launcher. No background services.
 
 | Tool | Purpose | Typical output |
 | --- | --- | --- |
 | `img2png` | Convert images (including GIMP XCF) to PNG | `photo.png` |
 | `resolve-prep` | Convert audio and/or video to editing-friendly formats | MOV or MKV with PCM audio and/or DNxHR video |
-| `crop-bars` | Detect, preview and remove black bars | Cropped video with audio/subtitles copied |
+| `crop-bars` | Detect, preview and remove black bars from video | Cropped video with audio/subtitles copied |
+| `extract-audio-artwork` | Extract embedded cover art from audio | PNG |
+| `extract-square-thumbnail` | Extract square cover art from audio | JPEG |
+| `remove-black-bars` | Trim uniform borders from images | Cropped image |
+| `resolve-keyboard-fix` | Toggle KDE appmenu workaround for Resolve shortcuts | KDE module state |
 
 ## Installation
 
@@ -38,7 +42,7 @@ The default destination is `~/.local/opt/media-tools`. To choose another directo
 bash install.sh --prefix ~/Custom/Scripts/media-tools
 ```
 
-The installer copies the scripts and example configuration, updates the absolute paths in KDE desktop entries, and installs:
+The installer copies all seven scripts and example configuration, updates the absolute paths in KDE desktop entries, and installs:
 
 | Component | Destination |
 | --- | --- |
@@ -127,6 +131,36 @@ The detector samples multiple timestamps, compares bar measurements and independ
 
 Default encoding uses AMD HEVC VA-API at QP 18. CPU `x264` and `x265` are alternatives. Audio and subtitle streams are copied where supported. Hardware encoding may not preserve all HDR metadata.
 
+## More handy scripts
+
+### Extract embedded audio artwork
+
+```bash
+extract-audio-artwork "album.flac"
+extract-audio-artwork *.mp3
+extract-square-thumbnail "album.flac"
+```
+
+`extract-audio-artwork` saves embedded cover artwork as a PNG next to the audio file. If an output exists, its KDE dialog asks whether to overwrite it; extraction uses a temporary file so a failed conversion does not delete the original output. It selects streams marked as attached pictures. `extract-square-thumbnail` selects an attached picture, centre-crops it to a square and saves a high-quality JPEG. It refuses to overwrite an existing thumbnail.
+
+### Remove image borders
+
+```bash
+remove-black-bars "screenshot.png"
+```
+
+Trims uniform-colour borders using ImageMagick and saves a separate `-cropped` image. It never overwrites an existing output and reports when no border is detected. This is for **images**, unlike `crop-bars`, which handles **videos**. Inspect the result: `-trim` can remove intentional same-colour margins.
+
+### Resolve keyboard shortcut workaround
+
+Launch **DaVinci Resolve Keyboard Fix** from the application menu, or run:
+
+```bash
+resolve-keyboard-fix
+```
+
+This opens a KDE dialog to unload or reload the `appmenu` module. The script checks whether the D-Bus operation succeeds before reporting success. **This changes KDE's appmenu module for the desktop session, not only Resolve.** Requires `kdialog` and `qdbus6`.
+
 ## Configuration
 
 The optional configuration examples live in `conf examples/`. Copy only those you need to `~/.config/media-tools/`, removing the `.example` suffix:
@@ -156,7 +190,11 @@ MediaScripts/
 ├── bin/
 │   ├── img2png
 │   ├── resolve-prep
-│   └── crop-bars
+│   ├── crop-bars
+│   ├── extract-audio-artwork
+│   ├── extract-square-thumbnail
+│   ├── remove-black-bars
+│   └── resolve-keyboard-fix
 ├── lib/
 │   ├── common.sh
 │   └── run-tests.sh
@@ -164,8 +202,8 @@ MediaScripts/
 │   ├── img2png.conf.example
 │   ├── resolve-prep.conf.example
 │   └── crop-bars.conf.example
-├── desktops/             # Dolphin service menus
-└── launchers/             # Application menu launchers
+├── desktops/             # Dolphin service menus (six entries)
+└── launchers/             # Application menu launchers (four entries)
 ```
 
 ## Notes and limitations
