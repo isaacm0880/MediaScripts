@@ -70,7 +70,31 @@ git pull --ff-only
 bash install.sh
 ```
 
-For a custom installation, use `bash install.sh --prefix /your/existing/path` again. The installer backs up files it replaces. It doesn't remove unrelated scripts or old context-menu entries.
+For a custom installation, use `bash install.sh --prefix /your/existing/path` again. The installer backs up files it replaces. It preserves user configuration and backs up superseded example files and old managed menu entries.
+
+## Configuration
+
+The three configurable tools load optional Bash configuration files from
+`${XDG_CONFIG_HOME:-$HOME/.config}/media-tools/`. The examples are stored in
+`config-examples/` and installed to `<prefix>/config-examples/`.
+
+| Tool | Example | Active configuration |
+| --- | --- | --- |
+| `image-to-png` | `image-to-png.conf.example` | `~/.config/media-tools/image-to-png.conf` |
+| `resolve-convert` | `resolve-convert.conf.example` | `~/.config/media-tools/resolve-convert.conf` |
+| `video-remove-borders` | `video-remove-borders.conf.example` | `~/.config/media-tools/video-remove-borders.conf` |
+
+Copy only the example you want to customise. For example:
+
+```bash
+mkdir -p ~/.config/media-tools
+cp config-examples/video-remove-borders.conf.example ~/.config/media-tools/video-remove-borders.conf
+```
+
+The installer **does not overwrite active user configuration**. The old config filenames
+(`img2png.conf`, `resolve-prep.conf`, `crop-bars.conf`) are not read by the
+renamed tools; copy your settings into the corresponding new filenames if needed.
+Environment variables and command-line options take precedence over the config file.
 
 ## Usage
 
@@ -165,11 +189,11 @@ This opens a KDE dialog to unload or reload the `appmenu` module. The script che
 
 ## Configuration
 
-The optional configuration examples live in `conf examples/`. Copy only those you need to `~/.config/media-tools/`, removing the `.example` suffix:
+The optional configuration examples live in `config-examples/`. Copy only those you need to `~/.config/media-tools/`, removing the `.example` suffix:
 
 ```bash
 mkdir -p ~/.config/media-tools
-cp "conf examples/resolve-convert.conf.example" ~/.config/media-tools/resolve-convert.conf
+cp "config-examples/resolve-convert.conf.example" ~/.config/media-tools/resolve-convert.conf
 ```
 
 There are corresponding examples for `image-to-png` and `video-remove-borders`. Review their comments before editing.
@@ -200,7 +224,7 @@ MediaScripts/
 ├── lib/
 │   ├── common.sh
 │   └── run-tests.sh
-├── conf examples/
+├── config-examples/
 │   ├── image-to-png.conf.example
 │   ├── resolve-convert.conf.example
 │   └── video-remove-borders.conf.example
