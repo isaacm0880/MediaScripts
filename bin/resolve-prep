@@ -588,7 +588,7 @@ process_file() {
   if ((YES && MODE_FROM_CLI)); then
     :
   elif ((INTERACTIVE)); then
-    read -r -p "Proceed with this plan? [y/N/q=quit] " ans || ans=n
+    read -r -p "Proceed with this plan? [Y/n/q=quit] " ans || ans=n
     case ${ans,,} in
       y|yes) ;;
       q|quit) mt_info "Quitting - nothing was written for this file."; QUIT=1; return 4 ;;
