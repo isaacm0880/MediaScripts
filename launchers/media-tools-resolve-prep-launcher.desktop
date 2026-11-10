@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Prepare Media for Resolve (pick files)
+Comment=Pick videos, then choose audio / video / both / analyse for each
+Icon=video-x-generic
+Categories=AudioVideo;Video;
+Terminal=false
+StartupNotify=false
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/resolve-prep --pick --pause

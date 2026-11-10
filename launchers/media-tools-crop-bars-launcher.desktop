@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Remove Black Bars (pick files)
+Comment=Choose videos, analyse, preview, confirm, crop
+Icon=transform-crop
+Categories=AudioVideo;Video;
+Terminal=false
+StartupNotify=false
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/crop-bars --pick --preview --open --pause
