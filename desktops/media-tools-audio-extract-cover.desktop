@@ -1,5 +1,7 @@
 [Desktop Entry]
 Type=Service
+Name=Extract Cover Art (PNG)
+Icon=image-png
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=audio/*;
 Actions=extractAudioArtwork;
