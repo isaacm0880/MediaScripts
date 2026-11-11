@@ -59,7 +59,7 @@ fi
 mkdir -p -- "$(dirname -- "$output")"
 [[ ! -e "$output" ]] || { echo "Output already exists: $output" >&2; exit 1; }
 tmp=$(mktemp --tmpdir="$(dirname -- "$output")" --suffix=.jpg)
-trap 'rm -f -- "$tmp"' EXIT
+trap 'rc=$?; rm -f -- "$tmp"; if ((rc != 0)); then report error "Square cover extraction failed (exit code $rc). Run the command in a terminal for details."; fi' EXIT
 
 ffmpeg -hide_banner -loglevel error -y \
     -i "$input" -map "0:$stream" -frames:v 1 \
@@ -70,4 +70,4 @@ ln -- "$tmp" "$output"
 rm -f -- "$tmp"
 trap - EXIT
 
-report info "Saved square cover:\n$output"
+report info "Saved square cover: $output"
