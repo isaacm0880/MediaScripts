@@ -66,8 +66,7 @@ ffmpeg -hide_banner -loglevel error -y \
     -vf "crop=min(iw\,ih):min(iw\,ih):(iw-min(iw\,ih))/2:(ih-min(iw\,ih))/2" \
     -q:v 2 "$tmp"
 
-ln -- "$tmp" "$output"
-rm -f -- "$tmp"
+mv -n -- "$tmp" "$output"
 trap - EXIT
 
 report info "Saved square cover: $output"
