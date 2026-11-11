@@ -2,6 +2,17 @@
 set -Eeuo pipefail
 
 # Extract embedded cover art from an audio file and centre-crop it square.
+# Dolphin launches without a terminal, so report errors and results using KDE dialogs.
+report() {
+    local level=$1 message=$2
+    if command -v kdialog >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+        if [[ $level == error ]]; then kdialog --error "$message"; else kdialog --msgbox "$message"; fi
+    else
+        printf '%s\n' "$message" >&2
+    fi
+}
+trap 'rc=$?; if ((rc != 0)); then report error "Square cover extraction failed (exit code $rc). Run the command in a terminal for details."; fi' EXIT
+
 # Usage: audio-extract-square-cover.sh FILE [OUTPUT.jpg]
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -59,4 +70,4 @@ ln -- "$tmp" "$output"
 rm -f -- "$tmp"
 trap - EXIT
 
-echo "Saved square thumbnail: $output"
+report info "Saved square cover:\n$output"
