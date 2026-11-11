@@ -10,4 +10,4 @@ X-KDE-Priority=TopLevel
 [Desktop Action ExtractSquareThumbnail]
 Name=Extract Square Cover (JPEG)
 Icon=image-x-generic
-Exec=konsole --hold -e /home/isaac/Custom/Scripts/media-tools/bin/audio-extract-square-cover %f
+Exec=konsole -e /home/isaac/Custom/Scripts/media-tools/bin/audio-extract-square-cover %f
